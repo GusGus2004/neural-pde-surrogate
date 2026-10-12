@@ -1,0 +1,22 @@
+# Data and outputs
+*.h5
+*.hdf5
+*.zarr/
+outputs/
+checkpoints/
+wandb/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# C++ build
+build/
+*.o
+*.so
+
+# Editor/OS
+.vscode/
+.DS_Store
