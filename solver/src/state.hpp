@@ -26,7 +26,6 @@ inline double sound_speed(const Primitive& W) {
     return std::sqrt(GAMMA*W.p/W.rho);
 }
 
-// TODO: physical flux F(U) = (rho*u, rho*u^2 + p, u*(E + p))
 inline Conserved physical_flux(const Conserved& U) {
     Primitive W = to_primitive(U);
     return {U.mom,
