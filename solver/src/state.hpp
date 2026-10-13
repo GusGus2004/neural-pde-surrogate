@@ -22,12 +22,14 @@ inline Primitive to_primitive(const Conserved& U) {
     return {U.rho, u, p};
 }
 
-// TODO: sound speed a = sqrt(GAMMA*p/rho)
 inline double sound_speed(const Primitive& W) {
-    return 0.0;
+    return std::sqrt(GAMMA*W.p/W.rho);
 }
 
 // TODO: physical flux F(U) = (rho*u, rho*u^2 + p, u*(E + p))
 inline Conserved physical_flux(const Conserved& U) {
-    return {};
+    Primitive W = to_primitive(U);
+    return {U.mom,
+    U.mom*W.u + W.p,
+    W.u*(U.E +W.p)};
 }
