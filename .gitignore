@@ -5,6 +5,7 @@
 outputs/
 checkpoints/
 wandb/
+*.csv
 
 # Python
 __pycache__/
@@ -20,3 +21,4 @@ build/
 # Editor/OS
 .vscode/
 .DS_Store
+
