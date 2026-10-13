@@ -7,8 +7,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
-constexpr int    N     = 200; 
+int N = 200;  // physical cells (default and can be overridden from the command)
 constexpr int    NG    = 2;    // ghost cells per side -> change to 2 for MUSCL
 constexpr double X_MIN = 0.0, X_MAX = 1.0, X0 = 0.5;
 constexpr double T_END = 0.2;
@@ -49,7 +50,12 @@ void write_csv(const std::vector<Conserved>& U, double dx, const std::string& pa
     }
 }
 
-int main(void) {
+int main(int argc, char* argv[]) {
+    if (argc > 1) N = std::atoi(argv[1]);
+    if (N <= 0) {
+        std::cerr << "Usage: ./build/euler [N]   (N = number of cells, > 0)\n";
+        return 1;
+    }
     const double dx = (X_MAX - X_MIN) / N;
     std::vector<Conserved> U(N + 2 * NG);
     std::vector<Conserved> F(N + 1);  // F[j] = flux through the left face of physical cell j
@@ -90,7 +96,9 @@ int main(void) {
                       << "  mass drift = " << total_mass(U, dx) - mass0 << '\n';
     }
 
-    write_csv(U, dx, "sod.csv");
-    std::cout << "Done: " << step << " steps, t = " << t << ", wrote sod.csv\n";
+    const std::string path = "sod_N" + std::to_string(N) + ".csv";
+    write_csv(U, dx, path);
+    std::cout << "Done: N = " << N << ", " << step << " steps, t = " << t
+              << ", wrote " << path << '\n';
     return 0;
 }

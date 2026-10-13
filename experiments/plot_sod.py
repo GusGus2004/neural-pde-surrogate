@@ -92,7 +92,8 @@ def main():
     out.parent.mkdir(exist_ok=True)
     fig.savefig(out, dpi=150)
     print(f"Saved {out}")
-    plt.show()
+    if "--show" in sys.argv:
+        plt.show()
 
 
 if __name__ == "__main__":
