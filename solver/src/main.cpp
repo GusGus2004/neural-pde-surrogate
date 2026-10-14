@@ -1,5 +1,6 @@
 #include "state.hpp"
 #include "riemann.hpp"
+#include "reconstruct.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,7 @@ constexpr int    NG    = 2;    // ghost cells per side -> change to 2 for MUSCL
 constexpr double X_MIN = 0.0, X_MAX = 1.0, X0 = 0.5;
 constexpr double T_END = 0.2;
 constexpr double CFL   = 0.8;
+using FluxFn = Conserved (*)(const Conserved&, const Conserved&);
 
 double cell_centre(int i, double dx) { return X_MIN + (i - NG + 0.5) * dx; }
 
@@ -29,6 +31,11 @@ double compute_dt(const std::vector<Conserved>& U, double dx) {
     for (int i = NG; i<NG+N; ++i)
     {
         Primitive W = to_primitive(U[i]);
+        if (!(W.rho > 0.0) || !(W.p > 0.0)) {
+            std::cerr << "Non-physical state in cell " << i - NG
+                      << ": rho = " << W.rho << ", p = " << W.p << '\n';
+            std::exit(1);
+        }
         double s = std::abs(W.u)+sound_speed(W);
         s_max = std::max(s_max,s);
     }
@@ -50,6 +57,34 @@ void write_csv(const std::vector<Conserved>& U, double dx, const std::string& pa
     }
 }
 
+void compute_fluxes(std::vector<Conserved>& U, std::vector<Conserved>& F,
+                    FluxFn flux, Limiter lim) {
+    apply_transmissive_bcs(U);
+    const int M = N + 2 * NG;
+    std::vector<Primitive> W(M), dW(M);
+    for (int i = 0; i < M; ++i) W[i] = to_primitive(U[i]);
+    for (int i = 1; i < M - 1; ++i) dW[i] = limited_slope(W[i - 1], W[i], W[i + 1], lim);
+
+    for (int j = 0; j <= N; ++j) {
+        int iL = NG + j - 1, iR = NG + j;   // cells either side of face j
+        Primitive WL{W[iL].rho + 0.5 * dW[iL].rho,   // right edge of the left cell
+                     W[iL].u   + 0.5 * dW[iL].u,
+                     W[iL].p   + 0.5 * dW[iL].p};
+        Primitive WR{W[iR].rho - 0.5 * dW[iR].rho,   
+                     W[iR].u   - 0.5 * dW[iR].u,
+                     W[iR].p   - 0.5 * dW[iR].p};
+        F[j] = flux(to_conserved(WL), to_conserved(WR));
+    }
+}
+
+void euler_step(const std::vector<Conserved>& U_in, const std::vector<Conserved>& F,
+                double dt, double dx, std::vector<Conserved>& U_out) {
+    for (int i = NG; i < NG + N; ++i) {
+        int j = i - NG;
+        U_out[i] = U_in[i] - (dt / dx) * (F[j + 1] - F[j]);
+    }
+}
+
 int main(int argc, char* argv[]) {
     if (argc > 1) N = std::atoi(argv[1]);
     if (N <= 0) {
@@ -58,7 +93,6 @@ int main(int argc, char* argv[]) {
     }
 
     const std::string scheme = argc > 2 ? argv[2] : "rusanov";
-    using FluxFn = Conserved (*)(const Conserved&, const Conserved&);
     FluxFn flux = nullptr;
     if      (scheme == "rusanov") flux = rusanov_flux;
     else if (scheme == "hllc")    flux = hllc_flux;
@@ -66,6 +100,19 @@ int main(int argc, char* argv[]) {
         std::cerr << "Unknown scheme '" << scheme << "' (use rusanov or hllc)\n";
         return 1;
     }
+
+    const std::string lim_name = argc > 3 ? argv[3] : "none";
+    Limiter lim = nullptr;
+    if      (lim_name == "none")      lim = no_slope;
+    else if (lim_name == "minmod")    lim = minmod;
+    else if (lim_name == "vanleer")   lim = van_leer;
+    else if (lim_name == "unlimited") lim = unlimited;
+    else {
+        std::cerr << "Unknown limiter '" << lim_name
+                  << "' (use none, minmod, vanleer or unlimited)\n";
+        return 1;
+    }
+
     const double dx = (X_MAX - X_MIN) / N;
     std::vector<Conserved> U(N + 2 * NG);
     std::vector<Conserved> F(N + 1);  // F[j] = flux through the left face of physical cell j
@@ -79,26 +126,24 @@ int main(int argc, char* argv[]) {
     double t = 0.0;
     int step = 0;
 
+    std::vector<Conserved> U1(N + 2 * NG), U2(N + 2 * NG);
+
     while (t < T_END) {
         apply_transmissive_bcs(U);
-
         double dt = compute_dt(U, dx);
         if (!(dt > 0.0) || !std::isfinite(dt)) {
-            std::cerr << "Bad dt = " << dt << " at step " << step
-                      << " (is compute_dt implemented?)\n";
+            std::cerr << "Bad dt = " << dt << " at step " << step << '\n';
             return 1;
         }
         dt = std::min(dt, T_END - t);
 
-        for (int j = 0; j <= N; ++j)
-            F[j] = flux(U[NG + j - 1], U[NG + j]);
+        compute_fluxes(U, F, flux, lim);
+        euler_step(U, F, dt, dx, U1);
+        compute_fluxes(U1, F, flux, lim);
+        euler_step(U1, F, dt, dx, U2);
+        for (int i = NG; i < NG + N; ++i)
+            U[i] = 0.5 * (U[i] + U2[i]);
 
-        for (int i = NG; i<NG+N;++i)
-        {
-            int j = i-NG;
-            U[i] = U[i] - (dt/dx)*(F[j+1]-F[j]);
-        }
-        
         t += dt;
         ++step;
         if (step % 50 == 0)
@@ -106,7 +151,8 @@ int main(int argc, char* argv[]) {
                       << "  mass drift = " << total_mass(U, dx) - mass0 << '\n';
     }
 
-    const std::string path = "sod_" + scheme + "_N" + std::to_string(N) + ".csv";
+    const std::string path = "sod_" + scheme + "_" + lim_name
+                           + "_N" + std::to_string(N) + ".csv";
     write_csv(U, dx, path);
     std::cout << "Done: N = " << N << ", " << step << " steps, t = " << t
               << ", wrote " << path << '\n';
