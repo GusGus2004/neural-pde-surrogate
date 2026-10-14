@@ -56,6 +56,16 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: ./build/euler [N]   (N = number of cells, > 0)\n";
         return 1;
     }
+
+    const std::string scheme = argc > 2 ? argv[2] : "rusanov";
+    using FluxFn = Conserved (*)(const Conserved&, const Conserved&);
+    FluxFn flux = nullptr;
+    if      (scheme == "rusanov") flux = rusanov_flux;
+    else if (scheme == "hllc")    flux = hllc_flux;
+    else {
+        std::cerr << "Unknown scheme '" << scheme << "' (use rusanov or hllc)\n";
+        return 1;
+    }
     const double dx = (X_MAX - X_MIN) / N;
     std::vector<Conserved> U(N + 2 * NG);
     std::vector<Conserved> F(N + 1);  // F[j] = flux through the left face of physical cell j
@@ -81,7 +91,7 @@ int main(int argc, char* argv[]) {
         dt = std::min(dt, T_END - t);
 
         for (int j = 0; j <= N; ++j)
-            F[j] = rusanov_flux(U[NG + j - 1], U[NG + j]);
+            F[j] = flux(U[NG + j - 1], U[NG + j]);
 
         for (int i = NG; i<NG+N;++i)
         {
@@ -96,7 +106,7 @@ int main(int argc, char* argv[]) {
                       << "  mass drift = " << total_mass(U, dx) - mass0 << '\n';
     }
 
-    const std::string path = "sod_N" + std::to_string(N) + ".csv";
+    const std::string path = "sod_" + scheme + "_N" + std::to_string(N) + ".csv";
     write_csv(U, dx, path);
     std::cout << "Done: N = " << N << ", " << step << " steps, t = " << t
               << ", wrote " << path << '\n';
