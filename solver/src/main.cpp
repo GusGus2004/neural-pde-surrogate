@@ -13,19 +13,26 @@
 int N = 200;  // physical cells (default and can be overridden from the command)
 constexpr int    NG    = 2;    // ghost cells per side -> change to 2 for MUSCL
 constexpr double X_MIN = 0.0, X_MAX = 1.0, X0 = 0.5;
-constexpr double T_END = 0.2;
-constexpr double CFL   = 0.8;
+double T_END = 0.2;
+constexpr double CFL   = 0.5;
+bool PERIODIC = false;
+constexpr double PI = 3.14159265358979323846;
+
 using FluxFn = Conserved (*)(const Conserved&, const Conserved&);
 
 double cell_centre(int i, double dx) { return X_MIN + (i - NG + 0.5) * dx; }
 
-void apply_transmissive_bcs(std::vector<Conserved>& U) {
+void apply_bcs(std::vector<Conserved>& U) {
     for (int g = 0; g < NG; ++g) {
-        U[g]          = U[NG];
-        U[NG + N + g] = U[NG + N - 1];
+        if (PERIODIC) {                     // wrap around: ghosts copy the opposite end
+            U[g]          = U[N + g];
+            U[NG + N + g] = U[NG + g];
+        } else {                            // transmissive: ghosts copy the nearest cell
+            U[g]          = U[NG];
+            U[NG + N + g] = U[NG + N - 1];
+        }
     }
 }
-
 double compute_dt(const std::vector<Conserved>& U, double dx) {
     double s_max = 0.0;
     for (int i = NG; i<NG+N; ++i)
@@ -50,6 +57,7 @@ double total_mass(const std::vector<Conserved>& U, double dx) {
 
 void write_csv(const std::vector<Conserved>& U, double dx, const std::string& path) {
     std::ofstream out(path);
+    out.precision(12);
     out << "x,rho,u,p\n";
     for (int i = NG; i < NG + N; ++i) {
         Primitive W = to_primitive(U[i]);
@@ -59,7 +67,7 @@ void write_csv(const std::vector<Conserved>& U, double dx, const std::string& pa
 
 void compute_fluxes(std::vector<Conserved>& U, std::vector<Conserved>& F,
                     FluxFn flux, Limiter lim) {
-    apply_transmissive_bcs(U);
+    apply_bcs(U);
     const int M = N + 2 * NG;
     std::vector<Primitive> W(M), dW(M);
     for (int i = 0; i < M; ++i) W[i] = to_primitive(U[i]);
@@ -84,6 +92,12 @@ void euler_step(const std::vector<Conserved>& U_in, const std::vector<Conserved>
         U_out[i] = U_in[i] - (dt / dx) * (F[j + 1] - F[j]);
     }
 }
+
+Primitive initial_state(double x, const std::string& test) {
+    if (test == "sine") return {1.0 + 0.2 * std::sin(2.0 * PI * x), 1.0, 1.0};
+    return x < X0 ? Primitive{1.0, 0.0, 1.0} : Primitive{0.125, 0.0, 0.1};   // Sod
+}
+
 
 int main(int argc, char* argv[]) {
     if (argc > 1) N = std::atoi(argv[1]);
@@ -113,14 +127,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    const std::string test = argc > 4 ? argv[4] : "sod";
+    if (test == "sine") { PERIODIC = true; T_END = 1.0; }
+    else if (test != "sod") {
+        std::cerr << "Unknown test '" << test << "' (use sod or sine)\n";
+        return 1;
+    }
+
     const double dx = (X_MAX - X_MIN) / N;
     std::vector<Conserved> U(N + 2 * NG);
     std::vector<Conserved> F(N + 1);  // F[j] = flux through the left face of physical cell j
 
-    const Primitive left {1.0,   0.0, 1.0};
-    const Primitive right{0.125, 0.0, 0.1};
     for (int i = NG; i < NG + N; ++i)
-        U[i] = to_conserved(cell_centre(i, dx) < X0 ? left : right);
+        U[i] = to_conserved(initial_state(cell_centre(i, dx), test));
 
     const double mass0 = total_mass(U, dx);
     double t = 0.0;
@@ -129,7 +148,7 @@ int main(int argc, char* argv[]) {
     std::vector<Conserved> U1(N + 2 * NG), U2(N + 2 * NG);
 
     while (t < T_END) {
-        apply_transmissive_bcs(U);
+        apply_bcs(U);
         double dt = compute_dt(U, dx);
         if (!(dt > 0.0) || !std::isfinite(dt)) {
             std::cerr << "Bad dt = " << dt << " at step " << step << '\n';
@@ -151,7 +170,7 @@ int main(int argc, char* argv[]) {
                       << "  mass drift = " << total_mass(U, dx) - mass0 << '\n';
     }
 
-    const std::string path = "sod_" + scheme + "_" + lim_name
+    const std::string path = test + "_" + scheme + "_" + lim_name
                            + "_N" + std::to_string(N) + ".csv";
     write_csv(U, dx, path);
     std::cout << "Done: N = " << N << ", " << step << " steps, t = " << t
