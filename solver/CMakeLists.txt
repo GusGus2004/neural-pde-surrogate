@@ -28,3 +28,8 @@ target_compile_options(test_grid2d PRIVATE -Wall -Wextra -O2)
 
 add_executable(test_solver2d src/test_solver2d.cpp)
 target_compile_options(test_solver2d PRIVATE -Wall -Wextra -O3)
+
+add_executable(test_io2d src/test_io2d.cpp)
+target_include_directories(test_io2d PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(test_io2d PRIVATE ${HDF5_LIBRARIES})
+target_compile_options(test_io2d PRIVATE -Wall -Wextra -O2)
