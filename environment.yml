@@ -1,0 +1,12 @@
+name: npde
+channels:
+  - defaults
+dependencies:
+  - numpy
+  - scipy
+  - h5py
+  - python=3.12
+  - hdf5
+  - matplotlib
+  - cmake
+prefix: /Users/georgelythgoe/opt/miniconda3/envs/npde
