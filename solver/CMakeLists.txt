@@ -22,3 +22,6 @@ target_compile_options(hdf5_check PRIVATE -Wall -Wextra -O3)
 
 add_executable(test_riemann2d src/test_riemann2d.cpp)
 target_compile_options(test_riemann2d PRIVATE -Wall -Wextra -O2)
+
+add_executable(test_grid2d src/test_grid2d.cpp)
+target_compile_options(test_grid2d PRIVATE -Wall -Wextra -O2)
