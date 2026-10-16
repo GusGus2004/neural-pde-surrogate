@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <cmath>
 
 using namespace e2d;
 
@@ -74,8 +75,21 @@ Problem setup(const std::string& test, int n, std::vector<Conserved>& U) {
                 const Primitive& W = top ? (right ? q1 : q2) : (right ? q4 : q3);
                 U[g.idx(i, j)] = to_conserved(W);
             }
-    } else {
-        std::cerr << "Unknown test '" << test << "' (use sod_x, sod_y or lax_liu3)\n";
+    }   else if (test == "sine2d") {
+        // smooth wave advected diagonally across periodic box
+        pr.grid = make_grid(n, n, 0.0, 1.0, 0.0, 1.0, BC::Periodic, BC::Periodic);
+        pr.t_end = 1.0;
+        U.assign(pr.grid.size(), Conserved{});
+        const double PI = 3.14159265358979323846;
+        const Grid& g = pr.grid;
+        for (int j = 0; j < g.ny; ++j)
+            for (int i = 0; i < g.nx; ++i) {
+                double rho = 1.0 + 0.2 * std::sin(2.0 * PI * (g.xc(i) + g.yc(j)));
+                U[g.idx(i, j)] = to_conserved({rho, 1.0, 1.0, 1.0});
+            }
+        }
+    else {
+        std::cerr << "Unknown test '" << test << "' (use sod_x, sod_y, lax_liu3 or sine2d)\n";
         std::exit(1);
     }
     return pr;
