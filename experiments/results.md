@@ -64,3 +64,31 @@ the contact still contributes 1.7e-3 of the total.
 - Mass drift ~1e-15 with periodic boundaries.
 
 Figure: `outputs/convergence_sine.png`
+
+
+## 3. 2D solver
+
+### Diagonal advection, t = 1, periodic (HLLC, SSP-RK2, CFL 0.5)
+
+ρ = 1 + 0.2 sin(2π(x + y)), u = v = 1, p = 1.
+
+| N   | none L1  | order | van Leer L1 | order | van Leer L∞ order |
+|-----|----------|-------|-------------|-------|-------------------|
+| 32  | 9.024e-2 | –     | 1.088e-2    | –     | –                 |
+| 64  | 5.862e-2 | 0.62  | 3.203e-3    | 1.76  | 1.41              |
+| 128 | 3.379e-2 | 0.79  | 8.531e-4    | 1.91  | 1.41              |
+| 256 | 1.820e-2 | 0.89  | 2.130e-4    | 2.00  | 1.41              |
+
+- Second order in 2D with van Leer; first order still approaching 1 (diagonal
+  wave has wavelength 1/√2, so coarse grids are pre-asymptotic).
+- L∞ order 1.41: clipping at smooth extrema, as in 1D.
+
+### Lax–Liu configuration 3, 256², t = 0.3 (HLLC + van Leer)
+
+- Matches published structure; symmetric about x = y to ~3e-14.
+- Faint stationary lines at x, y ≈ 0.5 in the top-right quadrant: weak waves from
+  the 4-significant-figure initial data, not a solver bug.
+
+### Performance (single core, MacBook Air)
+
+- Lax–Liu 3, 256²: 682 steps in 7.66 s → 5.84 million cell-updates/s.
