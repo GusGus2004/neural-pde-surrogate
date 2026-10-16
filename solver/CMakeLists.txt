@@ -19,3 +19,6 @@ add_executable(hdf5_check src/hdf5_check.cpp)
 target_include_directories(hdf5_check PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(hdf5_check PRIVATE ${HDF5_LIBRARIES})
 target_compile_options(hdf5_check PRIVATE -Wall -Wextra -O3)
+
+add_executable(test_riemann2d src/test_riemann2d.cpp)
+target_compile_options(test_riemann2d PRIVATE -Wall -Wextra -O2)
