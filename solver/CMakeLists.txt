@@ -33,3 +33,8 @@ add_executable(test_io2d src/test_io2d.cpp)
 target_include_directories(test_io2d PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(test_io2d PRIVATE ${HDF5_LIBRARIES})
 target_compile_options(test_io2d PRIVATE -Wall -Wextra -O2)
+
+add_executable(euler2d src/main2d.cpp)
+target_include_directories(euler2d PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(euler2d PRIVATE ${HDF5_LIBRARIES})
+target_compile_options(euler2d PRIVATE -Wall -Wextra -O3)
