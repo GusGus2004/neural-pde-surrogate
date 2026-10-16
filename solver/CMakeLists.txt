@@ -25,3 +25,6 @@ target_compile_options(test_riemann2d PRIVATE -Wall -Wextra -O2)
 
 add_executable(test_grid2d src/test_grid2d.cpp)
 target_compile_options(test_grid2d PRIVATE -Wall -Wextra -O2)
+
+add_executable(test_solver2d src/test_solver2d.cpp)
+target_compile_options(test_solver2d PRIVATE -Wall -Wextra -O3)
