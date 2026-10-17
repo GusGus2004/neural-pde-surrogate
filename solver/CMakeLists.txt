@@ -10,6 +10,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(HDF5 REQUIRED COMPONENTS C)
+find_package(OpenMP REQUIRED)
 
 add_executable(euler src/main.cpp)
 target_compile_options(euler PRIVATE -Wall -Wextra -O3)
@@ -38,3 +39,10 @@ add_executable(euler2d src/main2d.cpp)
 target_include_directories(euler2d PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(euler2d PRIVATE ${HDF5_LIBRARIES})
 target_compile_options(euler2d PRIVATE -Wall -Wextra -O3)
+
+add_executable(openmp_check src/openmp_check.cpp)
+target_link_libraries(openmp_check PRIVATE OpenMP::OpenMP_CXX)
+target_compile_options(openmp_check PRIVATE -Wall -Wextra -O3)
+
+target_link_libraries(euler2d PRIVATE OpenMP::OpenMP_CXX)
+target_link_libraries(test_solver2d PRIVATE OpenMP::OpenMP_CXX)

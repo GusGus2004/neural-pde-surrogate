@@ -5,6 +5,9 @@
 #include "io_hdf5.hpp"
 
 #include <chrono>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -162,8 +165,12 @@ int main(int argc, char* argv[]) {
         return dir + buf;
     };
 
-    std::printf("%s: %d x %d cells, t_end = %g, %s + %s, CFL %g\n",
-                test.c_str(), g.nx, g.ny, pr.t_end, scheme.c_str(), lim_name.c_str(), cfl);
+    int threads = 1;
+#ifdef _OPENMP
+    threads = omp_get_max_threads();
+#endif
+    std::printf("%s: %d x %d cells, t_end = %g, %s + %s, CFL %g, %d thread(s)\n",
+                test.c_str(), g.nx, g.ny, pr.t_end, scheme.c_str(), lim_name.c_str(), cfl, threads);
 
     double t = 0.0;
     int step = 0;
