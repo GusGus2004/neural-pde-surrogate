@@ -3,6 +3,7 @@
 // Usage: ./build/euler2d --test lax_liu3 --n 256 --scheme hllc --limiter vanleer --nout 10 --out runs
 #include "solver2d.hpp"
 #include "io_hdf5.hpp"
+#include "trajectory.hpp"
 
 #include <chrono>
 #ifdef _OPENMP
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -22,7 +24,8 @@ using namespace e2d;
 std::map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::map<std::string, std::string> a = {
         {"test", "lax_liu3"}, {"n", "256"}, {"scheme", "hllc"}, {"limiter", "vanleer"},
-        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}, {"init", ""}};
+        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}, {"init", ""},
+        {"traj", ""}, {"save", ""}};
     for (int k = 1; k < argc; ++k) {
         std::string key = argv[k];
         if (key.rfind("--", 0) != 0 || k + 1 >= argc) {
@@ -178,15 +181,7 @@ int main(int argc, char* argv[]) {
     const Grid& g = pr.grid;
     Solver solver(g, flux, lim, cfl);
 
-    const std::string dir = a["out"] + "/" + run_name + "_" + scheme + "_" + lim_name + "_N" + std::to_string(g.nx);
-    std::filesystem::create_directories(dir);
-    RunInfo info{run_name, scheme, lim_name, cfl, 0};
-    auto snap_path = [&](int k) {
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "/snap_%04d.h5", k);
-        return dir + buf;
-    };
-
+        RunInfo info{run_name, scheme, lim_name, cfl, 0};
     int threads = 1;
 #ifdef _OPENMP
     threads = omp_get_max_threads();
@@ -194,28 +189,65 @@ int main(int argc, char* argv[]) {
     std::printf("%s: %d x %d cells, t_end = %g, %s + %s, CFL %g, %d thread(s)\n",
                 run_name.c_str(), g.nx, g.ny, pr.t_end, scheme.c_str(), lim_name.c_str(), cfl, threads);
 
+    // Two output modes:
+    //   --traj FILE  one trajectory file (all frames, conserved variables, float32), at the --save sizes
+    //   otherwise    one snapshot file per frame (primitive variables, float64) in a run folder
+    const bool traj_mode = !a["traj"].empty();
+    std::unique_ptr<TrajectoryWriter> traj;
+    std::string dir;
+    if (traj_mode) {
+        try {
+            traj = std::make_unique<TrajectoryWriter>(
+                g, a["save"].empty() ? std::vector<int>{g.nx} : parse_sizes(a["save"]));
+        } catch (const std::exception& e) {
+            std::cerr << "Bad --save: " << e.what() << '\n';
+            return 1;
+        }
+    } else {
+        dir = a["out"] + "/" + run_name + "_" + scheme + "_" + lim_name + "_N" + std::to_string(g.nx);
+        std::filesystem::create_directories(dir);
+    }
+    auto snap_path = [&](int k) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "/snap_%04d.h5", k);
+        return dir + buf;
+    };
+    auto output = [&](int k, double t) {
+        if (traj_mode) traj->add(U, t);
+        else           write_snapshot(snap_path(k), g, U, t, info);
+    };
+
     double t = 0.0;
     int step = 0;
-    write_snapshot(snap_path(0), g, U, t, info);
+    output(0, t);
     auto t0 = std::chrono::steady_clock::now();
 
     for (int k = 1; k <= nout; ++k) {
-        const double t_next = pr.t_end * k / nout;    
+        const double t_next = pr.t_end * k / nout;     // frames at equally spaced times
         while (t < t_next) {
-            double dt = std::min(solver.compute_dt(U), t_next - t);
+            double dt = std::min(solver.compute_dt(U), t_next - t);   // land exactly on t_next
             solver.step(U, dt);
             t += dt;
             ++step;
         }
         info.step = step;
-        write_snapshot(snap_path(k), g, U, t, info);
-        std::printf("  snapshot %2d/%d  t = %.4f  step %d\n", k, nout, t, step);
+        output(k, t);
+        if (!traj_mode) std::printf("  snapshot %2d/%d  t = %.4f  step %d\n", k, nout, t, step);
+    }
+
+    if (traj_mode) {
+        try {
+            traj->write(a["traj"], info, pr.t_end);
+        } catch (const std::exception& e) {
+            std::cerr << "Error writing trajectory: " << e.what() << '\n';
+            return 1;
+        }
     }
 
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     double mcells = double(g.nx) * g.ny * step / secs / 1e6;
-    std::printf("Done: %d steps in %.2f s (%.2f million cell-updates per second). Output in %s/\n",
-                step, secs, mcells, dir.c_str());
+    std::printf("Done: %d steps in %.2f s (%.2f million cell-updates per second). Output in %s\n",
+                step, secs, mcells, traj_mode ? a["traj"].c_str() : (dir + "/").c_str());
     if (a["profile"] == "yes") solver.profile().print(step, long(g.nx) * g.ny);
     return 0;
 }
