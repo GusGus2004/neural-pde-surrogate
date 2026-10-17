@@ -22,7 +22,7 @@ using namespace e2d;
 std::map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::map<std::string, std::string> a = {
         {"test", "lax_liu3"}, {"n", "256"}, {"scheme", "hllc"}, {"limiter", "vanleer"},
-        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}};
+        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}};
     for (int k = 1; k < argc; ++k) {
         std::string key = argv[k];
         if (key.rfind("--", 0) != 0 || k + 1 >= argc) {
@@ -153,6 +153,10 @@ int main(int argc, char* argv[]) {
 
     std::vector<Conserved> U;
     Problem pr = setup(test, n, U);
+
+    if (a["tend"] != "default") pr.t_end = std::atof(a["tend"].c_str());   // override test's end time
+    if (!(pr.t_end > 0.0)) { std::cerr << "tend must be positive\n"; return 1; }
+
     const Grid& g = pr.grid;
     Solver solver(g, flux, lim, cfl);
 

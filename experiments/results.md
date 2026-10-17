@@ -106,3 +106,19 @@ Figure: `outputs/convergence_sine.png`
 - Coarse grids under-predict growth (numerical diffusion damps the shear layer).
 - Large-scale structure identical at all resolutions; only spiral detail sharpens.
 - Single-core performance: 256², 4511 steps in 50 s → 5.9 M cell-updates/s.
+
+### OpenMP strong scaling (MacBook Air, 4 performance + 4 efficiency cores)
+
+Short KH runs; speed-up relative to 1 thread. Parallel results bit-for-bit identical to serial.
+
+| N   | 1 thread (M cells/s) | 2      | 4      | 8      |
+|-----|----------------------|--------|--------|--------|
+| 128 | 5.38                 | 1.96×  | 3.12×  | 2.67×  |
+| 256 | 5.99                 | 1.95×  | 3.08×  | 2.25×  |
+| 512 | 6.06                 | 1.97×  | 2.68×  | 2.57×  |
+
+- Near-perfect scaling to 2 threads: parallelisation itself is sound.
+- 8 threads slower than 4: static row split + slower efficiency cores; P-core threads wait
+  at every loop's end for E-core threads. Use OMP_NUM_THREADS=4 on this machine.
+- 512² scales worst at 4 threads: working set (~52 MB) exceeds the shared cache, so the
+  update becomes memory-bandwidth-bound (hypothesis; to confirm with profiling).
