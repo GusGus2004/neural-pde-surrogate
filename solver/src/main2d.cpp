@@ -88,8 +88,41 @@ Problem setup(const std::string& test, int n, std::vector<Conserved>& U) {
                 U[g.idx(i, j)] = to_conserved({rho, 1.0, 1.0, 1.0});
             }
         }
+
+        else if (test == "kh") {
+        // Kelvin-Helmholtz instability smooth version of McNally Lyra & Passy (2012).
+        // Two shear layers (at y = 1/4 and y = 3/4) separate a dense strip moving left from lighter
+        // fluid moving right, small vertical velocity wiggle seeds the instability.
+        pr.grid = make_grid(n, n, 0.0, 1.0, 0.0, 1.0, BC::Periodic, BC::Periodic);
+        pr.t_end = 2.0;
+        U.assign(pr.grid.size(), Conserved{});
+        const double PI = 3.14159265358979323846;
+        const double rho1 = 1.0, rho2 = 2.0, rhom = 0.5 * (rho1 - rho2);
+        const double u1 = 0.5, u2 = -0.5, um = 0.5 * (u1 - u2);
+        const double L = 0.025;                       // thickness of the shear layers
+        const Grid& g = pr.grid;
+        for (int j = 0; j < g.ny; ++j)
+            for (int i = 0; i < g.nx; ++i) {
+                double x = g.xc(i), y = g.yc(j), rho, u;
+                if (y < 0.25) {
+                    rho = rho1 - rhom * std::exp((y - 0.25) / L);
+                    u   = u1   - um   * std::exp((y - 0.25) / L);
+                } else if (y < 0.5) {
+                    rho = rho2 + rhom * std::exp((0.25 - y) / L);
+                    u   = u2   + um   * std::exp((0.25 - y) / L);
+                } else if (y < 0.75) {
+                    rho = rho2 + rhom * std::exp((y - 0.75) / L);
+                    u   = u2   + um   * std::exp((y - 0.75) / L);
+                } else {
+                    rho = rho1 - rhom * std::exp((0.75 - y) / L);
+                    u   = u1   - um   * std::exp((0.75 - y) / L);
+                }
+                double v = 0.01 * std::sin(4.0 * PI * x);     // seed perturbation
+                U[g.idx(i, j)] = to_conserved({rho, u, v, 2.5});
+            }
+        }
     else {
-        std::cerr << "Unknown test '" << test << "' (use sod_x, sod_y, lax_liu3 or sine2d)\n";
+        std::cerr << "Unknown test '" << test << "' (use sod_x, sod_y, lax_liu3, sine2d or kh)\n";
         std::exit(1);
     }
     return pr;
