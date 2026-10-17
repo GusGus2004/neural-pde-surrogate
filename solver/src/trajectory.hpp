@@ -50,7 +50,7 @@ public:
         }
     }
 
-    void write(const std::string& path, const RunInfo& info, double t_end) const {
+    void write(const std::string& path, const RunInfo& info, double t_end, double t_start = 0.0) const {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         if (file < 0) throw std::runtime_error("could not create " + path + " (does the folder exist?)");
 
@@ -72,6 +72,7 @@ public:
         }
 
         detail::write_attr(file, "variables", std::string("rho, rho*u, rho*v, E"));
+        detail::write_attr(file, "t_start", t_start);
         detail::write_attr(file, "t_end", t_end);
         detail::write_attr(file, "frames", int(times.size()));
         detail::write_attr(file, "steps", info.step);

@@ -118,8 +118,59 @@ def blast(rng, n):
               "bubbles": np.array(bubbles).reshape(-1, 4)}  
     return rho, u, v, p, c["t_end"], params
 
+# kh
 
-FAMILIES = {"riemann": riemann, "blast": blast}
+KH = dict(
+    rho_out=(0.5, 2.0),        # density outside the middle strip (log-uniform)
+    rho_ratio=(0.33, 3.0),     # strip density / outside density (log-uniform): strip heavier or lighter
+    shear=(0.5, 1.5),          # velocity difference between strip and outside
+    drift=0.3,                 # bulk velocity in x, uniform in [-drift, drift]
+    p=(1.5, 3.5),              # uniform pressure (log-uniform)
+    thickness=(0.015, 0.04),   # shear-layer thickness L
+    waves=(1, 4),              # number of seed wavelengths across the box (inclusive)
+    seed_amp=(0.005, 0.02),    # amplitude of the vertical-velocity seed
+    t_start=(0.2, 1.5),        # recording starts here, after an unrecorded spin-up
+    window=0.25,               # recorded duration: same frame spacing as the other families
+)
+
+
+def kh(rng, n):
+    """Kelvin-Helmholtz instability (smooth McNally et al. 2012 form) with random params
+
+    A strip y0 + 1/4 < y < y0 + 3/4 moves against the fluid outside it. Recording starts at random
+    time t_start so different samples catch the instability at different stages: linear growth,
+    roll-up, or saturated vortices. Held out of training as the out-of-distribution test family.
+    """
+    c = KH
+    rho1 = log_uniform(rng, *c["rho_out"])
+    rho2 = rho1 * log_uniform(rng, *c["rho_ratio"])
+    dU = rng.uniform(*c["shear"])
+    drift = rng.uniform(-c["drift"], c["drift"])
+    p0 = log_uniform(rng, *c["p"])
+    L = rng.uniform(*c["thickness"])
+    k = int(rng.integers(c["waves"][0], c["waves"][1] + 1))
+    amp = rng.uniform(*c["seed_amp"])
+    phase = rng.uniform(0, 2 * np.pi)
+    y0 = rng.uniform(0, 1)                      # shifts the whole pattern vertically (periodic)
+    t_start = rng.uniform(*c["t_start"])
+
+    x = cell_centres(n)
+    X, Y = np.meshgrid(x, x)
+    yy = (Y - y0) % 1.0                        
+    s = np.where(yy < 0.25, 0.5 * np.exp((yy - 0.25) / L),
+        np.where(yy < 0.5, 1.0 - 0.5 * np.exp((0.25 - yy) / L),
+        np.where(yy < 0.75, 1.0 - 0.5 * np.exp((yy - 0.75) / L),
+                 0.5 * np.exp((0.75 - yy) / L))))
+    rho = rho1 + (rho2 - rho1) * s
+    u = drift + 0.5 * dU * (1.0 - 2.0 * s)
+    v = amp * np.sin(2 * np.pi * k * X + phase)
+    p = np.full((n, n), p0)
+    params = {"rho_out": rho1, "rho_strip": rho2, "shear": dU, "drift": drift, "p0": p0,
+              "thickness": L, "waves": k, "seed_amp": amp, "seed_phase": phase, "y0": y0,
+              "t_start": t_start}
+    return rho, u, v, p, t_start + c["window"], params
+
+FAMILIES = {"riemann": riemann, "blast": blast, "kh": kh}
 
 
 def sample(family, index, n):

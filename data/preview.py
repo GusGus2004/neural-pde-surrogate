@@ -36,8 +36,10 @@ with tempfile.TemporaryDirectory() as tmp:
         ic_path, traj_path = Path(tmp) / "ic.h5", Path(tmp) / "traj.h5"
         write_ic(ic_path, rho, u, v, p, t_end=t_end, test=args.family)
         t0 = time.time()
+        t_start = params.get("t_start", 0.0)          
         res = subprocess.run([str(EXE), "--init", str(ic_path), "--nout", "50", "--traj", str(traj_path),
-                              "--save", str(args.n // 2)], capture_output=True, text=True)
+                              "--save", str(args.n // 2), "--tstart", str(t_start)],
+                             capture_output=True, text=True)
         secs = time.time() - t0
         if res.returncode != 0:
             print(f"index {index}: FAILED\n{res.stderr.strip()}")
@@ -53,8 +55,8 @@ with tempfile.TemporaryDirectory() as tmp:
             ax.imshow(rho_all[k], origin="lower", extent=[0, 1, 0, 1], cmap="viridis")
             ax.set_xticks([]); ax.set_yticks([])
             if row == 0:
-                ax.set_title(f"frame {k} (t = {t_end * k / 50:.3f})", fontsize=9)
-        axes[row, 0].set_ylabel(f"#{index}", fontsize=9)
+                ax.set_title(f"frame {k}", fontsize=9)
+        axes[row, 0].set_ylabel(f"#{index}  (t = {t_start:.2f}..{t_end:.2f})", fontsize=8)
 
 fig.suptitle(f"{args.family}: density, solver {args.n}², stored {args.n // 2}²", fontsize=10)
 fig.tight_layout(rect=(0, 0, 1, 0.98))  

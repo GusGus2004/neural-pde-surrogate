@@ -25,7 +25,7 @@ std::map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::map<std::string, std::string> a = {
         {"test", "lax_liu3"}, {"n", "256"}, {"scheme", "hllc"}, {"limiter", "vanleer"},
         {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}, {"init", ""},
-        {"traj", ""}, {"save", ""}};
+        {"traj", ""}, {"save", ""}, {"tstart", "0"}};
     for (int k = 1; k < argc; ++k) {
         std::string key = argv[k];
         if (key.rfind("--", 0) != 0 || k + 1 >= argc) {
@@ -217,13 +217,23 @@ int main(int argc, char* argv[]) {
         else           write_snapshot(snap_path(k), g, U, t, info);
     };
 
+        // Optionally run silently up to t_start, then record nout frames between t_start and t_end
+    const double t_start = std::atof(a["tstart"].c_str());
+    if (!(t_start >= 0.0 && t_start < pr.t_end)) { std::cerr << "need 0 <= tstart < t_end\n"; return 1; }
+
     double t = 0.0;
     int step = 0;
-    output(0, t);
     auto t0 = std::chrono::steady_clock::now();
+    while (t < t_start) {
+        double dt = std::min(solver.compute_dt(U), t_start - t);
+        solver.step(U, dt);
+        t += dt;
+        ++step;
+    }
+    output(0, t);
 
     for (int k = 1; k <= nout; ++k) {
-        const double t_next = pr.t_end * k / nout;     // frames at equally spaced times
+        const double t_next = t_start + (pr.t_end - t_start) * k / nout; 
         while (t < t_next) {
             double dt = std::min(solver.compute_dt(U), t_next - t);   // land exactly on t_next
             solver.step(U, dt);
@@ -237,7 +247,7 @@ int main(int argc, char* argv[]) {
 
     if (traj_mode) {
         try {
-            traj->write(a["traj"], info, pr.t_end);
+            traj->write(a["traj"], info, pr.t_end, t_start);
         } catch (const std::exception& e) {
             std::cerr << "Error writing trajectory: " << e.what() << '\n';
             return 1;
