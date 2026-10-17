@@ -3,14 +3,17 @@
 #include "riemann2d.hpp"
 #include "limiters.hpp"
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
 
 namespace e2d {
 
-// lim slope of each primitive variable
+// lim slope of each primitive variable, from the cells either side.
 inline Primitive limited_slope(const Primitive& Wm, const Primitive& W0, const Primitive& Wp, Limiter lim) {
     return {lim(W0.rho - Wm.rho, Wp.rho - W0.rho),
             lim(W0.u   - Wm.u,   Wp.u   - W0.u),
@@ -23,18 +26,46 @@ inline Primitive edge(const Primitive& W, const Primitive& dW, double s) {
     return {W.rho + 0.5 * s * dW.rho, W.u + 0.5 * s * dW.u, W.v + 0.5 * s * dW.v, W.p + 0.5 * s * dW.p};
 }
 
-// 2-order finite-volume solver: MUSCL reconstruction, Riemann solver at every face, SSP-RK2.
+struct Profile {
+    enum Phase { DT, BCS, PRIM, XSWEEP, YSLOPE, YFLUX, YACCUM, RK, N_PHASES };
+    static constexpr const char* names[N_PHASES] = {
+        "compute_dt", "boundary conditions", "U -> W (primitives)", "x: slopes + fluxes + update",
+        "y: slopes", "y: face fluxes -> G", "y: add G into L", "RK stage updates"};
+    std::array<double, N_PHASES> secs{};
+    using clock = std::chrono::steady_clock;
+    clock::time_point t0 = clock::now();
+    void start() { t0 = clock::now(); }
+    void lap(Phase p) {                         // charge the time since the last lap to phase p
+        auto t1 = clock::now();
+        secs[p] += std::chrono::duration<double>(t1 - t0).count();
+        t0 = t1;
+    }
+    void print(long steps, long cells) const {
+        double total = 0.0;
+        for (double x : secs) total += x;
+        std::printf("\n%-30s %9s %7s %12s\n", "phase", "time (s)", "share", "ns per cell");
+        for (int k = 0; k < N_PHASES; ++k)
+            std::printf("%-30s %9.3f %6.1f%% %12.2f\n", names[k], secs[k], 100.0 * secs[k] / total,
+                        1e9 * secs[k] / (double(steps) * cells));
+        std::printf("%-30s %9.3f %6.1f%% %12.2f\n", "total", total, 100.0, 1e9 * total / (double(steps) * cells));
+    }
+};
+
+// Second-order finite-volume solver: MUSCL reconstruction, a Riemann solver at every face, SSP-RK2.
 // All work arrays are allocated once in the constructor and reused every step.
 // Loops are parallelised over rows (j) with OpenMP; results are bit-for-bit identical for any thread count.
 class Solver {
 public:
+    const Profile& profile() const { return prof; }
+
     Solver(const Grid& grid, FluxFn flux, Limiter lim, double cfl)
         : g(grid), flux(flux), lim(lim), cfl(cfl),
           W(grid.size()), dW(grid.size()), L(grid.size()), U1(grid.size()),
           G(size_t(grid.nx) * (grid.ny + 1)) {}
 
-    // Largest stable time step (2D CFL condition). Stops program on non-physical state.
+    // Largest stable time step (2D CFL condition). Stops the program on a non-physical state.
     double compute_dt(const std::vector<Conserved>& U) const {
+        prof.start();                             // ignore time spent outside the solver (e.g. writing output)
         double sx = 0.0, sy = 0.0;
         bool bad = false;
         #pragma omp parallel for reduction(max : sx, sy) reduction(|| : bad)
@@ -47,10 +78,11 @@ public:
                 sy = std::max(sy, std::abs(Wc.v) + a);
             }
         if (bad) report_bad_cell(U);
+        prof.lap(Profile::DT);
         return cfl / (sx / g.dx + sy / g.dy);
     }
 
-    // SSP-RK2 step: U <- U(t + dt).
+    // One SSP-RK2 step: U <- U(t + dt).
     void step(std::vector<Conserved>& U, double dt) {
         compute_rhs(U);                                   // L = L(U)
         #pragma omp parallel for
@@ -59,6 +91,7 @@ public:
                 int k = g.idx(i, j);
                 U1[k] = U[k] + dt * L[k];
             }
+        prof.lap(Profile::RK);
         compute_rhs(U1);                                  // L = L(U1)
         #pragma omp parallel for
         for (int j = 0; j < g.ny; ++j)
@@ -66,6 +99,7 @@ public:
                 int k = g.idx(i, j);
                 U[k] = 0.5 * (U[k] + U1[k] + dt * L[k]);
             }
+        prof.lap(Profile::RK);
     }
 
 private:
@@ -76,8 +110,9 @@ private:
     std::vector<Primitive> W, dW;   // primitives and slopes (slopes reused for x, then y)
     std::vector<Conserved> L, U1;   // rate of change dU/dt, and the intermediate RK stage
     std::vector<Conserved> G;       // y-face fluxes, nx * (ny + 1)
+    mutable Profile prof;           // mutable: compute_dt is const but still records its time
 
-    // srial search for  first non-physical cell so  error message same for any thread count
+    // ser search for the first non-physical cell
     void report_bad_cell(const std::vector<Conserved>& U) const {
         for (int j = 0; j < g.ny; ++j)
             for (int i = 0; i < g.nx; ++i) {
@@ -90,14 +125,17 @@ private:
             }
     }
 
-    // L = -(F_right - F_left)/dx - (G_top - G_bottom)/dy every physical cell
+    // L = -(F_right - F_left)/dx - (G_top - G_bottom)/dy for every physical cell.
     void compute_rhs(std::vector<Conserved>& U) {
+        prof.lap(Profile::RK);                   
         apply_bcs(g, U);
+        prof.lap(Profile::BCS);
         #pragma omp parallel for
         for (int k = 0; k < g.size(); ++k) W[k] = to_primitive(U[k]);
+        prof.lap(Profile::PRIM);
 
         // ---- x-direction ----
-        // Each row j only touches its own cells so rows can run on different threads
+        // Each row j only touches its own cells, so rows can run on different threads.
         #pragma omp parallel for
         for (int j = 0; j < g.ny; ++j) {
             for (int i = 0; i < g.nx; ++i) L[g.idx(i, j)] = Conserved{};
@@ -113,13 +151,16 @@ private:
             }
         }
 
+        prof.lap(Profile::XSWEEP);
+
         // ---- y-direction ----
-        // A y-face touches two different rows, so two threads could update the same cell at once
-        // Instead: (1) compute every face flux into G, (2) let each row collect its own two fluxes
+        // A y-face touches two different rows, so two threads could update the same cell at once.
+        // Instead: (1) compute every face flux into G, (2) let each row collect its own two fluxes.
         #pragma omp parallel for
         for (int j = -1; j <= g.ny; ++j)
             for (int i = 0; i < g.nx; ++i)
                 dW[g.idx(i, j)] = limited_slope(W[g.idx(i, j - 1)], W[g.idx(i, j)], W[g.idx(i, j + 1)], lim);
+        prof.lap(Profile::YSLOPE);
         #pragma omp parallel for
         for (int j = 0; j <= g.ny; ++j)                    // face j sits between cells j-1 and j
             for (int i = 0; i < g.nx; ++i) {
@@ -127,6 +168,7 @@ private:
                 G[size_t(j) * g.nx + i] = flux_y_face(flux, to_conserved(edge(W[kb], dW[kb], +1.0)),
                                                             to_conserved(edge(W[kt], dW[kt], -1.0)));
             }
+        prof.lap(Profile::YFLUX);
         #pragma omp parallel for
         for (int j = 0; j < g.ny; ++j)
             for (int i = 0; i < g.nx; ++i) {
@@ -134,7 +176,8 @@ private:
                 L[k] = L[k] + (1.0 / g.dy) * G[size_t(j) * g.nx + i];         // in through the bottom face
                 L[k] = L[k] - (1.0 / g.dy) * G[size_t(j + 1) * g.nx + i];     // out through the top face
             }
+        prof.lap(Profile::YACCUM);
     }
 };
 
-}
+} 

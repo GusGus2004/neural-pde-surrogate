@@ -136,3 +136,26 @@ Short KH runs; speed-up relative to 1 thread. Parallel results bit-for-bit ident
   at large grids (working set ~52 MB/job). Thermal throttling ruled out by the 128² control.
 - At 512², 1 job × 4 threads (16.3 M/s) beats 4 jobs × 1 thread (13.3 M/s): threads share
   one working set. At 128² the reverse holds (18.0 vs 16.8).
+
+
+  ### Per-phase profile, 512², KH (1 vs 4 threads)
+
+| Phase                 | 1 thread (s) | 4 threads (s) | speed-up |
+|-----------------------|--------------|---------------|----------|
+| x: slopes + fluxes    | 4.276        | 1.908         | 2.24×    |
+| y: face fluxes        | 3.000        | 1.325         | 2.26×    |
+| y: slopes             | 0.847        | 0.385         | 2.20×    |
+| y: add G into L       | 0.540        | 0.251         | 2.15×    |
+| compute_dt            | 0.279        | 0.135         | 2.07×    |
+| RK updates            | 0.406        | 0.260         | 1.56×    |
+| U → W                 | 0.194        | 0.136         | 1.43×    |
+| total                 | 9.55         | 4.42          | 2.16×    |
+
+- Flux computation (Riemann solver) is ~75% of run time.
+- Compute-heavy and streaming phases slow down almost equally at 4 threads → the main
+  limit is not memory bandwidth but thread placement/clock on macOS (no thread pinning,
+  P/E cores, fanless). Pure-streaming phases show an extra bandwidth penalty but are ~6% of time.
+- Run-to-run variance ~25% at 4 threads on the Mac; use medians of repeats, and the
+  cluster (pinned threads) for definitive scaling numbers.
+- Optimisation targets: inline flux/limiter (templates instead of function pointers);
+  avoid primitive↔conserved round trips at faces.

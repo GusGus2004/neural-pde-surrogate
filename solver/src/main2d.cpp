@@ -22,7 +22,7 @@ using namespace e2d;
 std::map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::map<std::string, std::string> a = {
         {"test", "lax_liu3"}, {"n", "256"}, {"scheme", "hllc"}, {"limiter", "vanleer"},
-        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}};
+        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}};
     for (int k = 1; k < argc; ++k) {
         std::string key = argv[k];
         if (key.rfind("--", 0) != 0 || k + 1 >= argc) {
@@ -198,5 +198,6 @@ int main(int argc, char* argv[]) {
     double mcells = double(g.nx) * g.ny * step / secs / 1e6;
     std::printf("Done: %d steps in %.2f s (%.2f million cell-updates per second). Output in %s/\n",
                 step, secs, mcells, dir.c_str());
+    if (a["profile"] == "yes") solver.profile().print(step, long(g.nx) * g.ny);
     return 0;
 }
