@@ -122,3 +122,17 @@ Short KH runs; speed-up relative to 1 thread. Parallel results bit-for-bit ident
   at every loop's end for E-core threads. Use OMP_NUM_THREADS=4 on this machine.
 - 512² scales worst at 4 threads: working set (~52 MB) exceeds the shared cache, so the
   update becomes memory-bandwidth-bound (hypothesis; to confirm with profiling).
+
+  ### Concurrent single-threaded jobs (memory-bandwidth test)
+
+| N   | 1 job  | 2 jobs (each) | 4 jobs (each) | 4 jobs total |
+|-----|--------|---------------|---------------|--------------|
+| 128 | 4.73*  | 5.56          | ~4.5          | 18.0 M/s     |
+| 512 | 6.09   | 5.89          | 3.33          | 13.3 M/s     |
+
+*first run, likely clock ramp-up.
+
+- 512²: per-job throughput drops 45% at 4 jobs vs ~19% at 128² → memory-bandwidth-bound
+  at large grids (working set ~52 MB/job). Thermal throttling ruled out by the 128² control.
+- At 512², 1 job × 4 threads (16.3 M/s) beats 4 jobs × 1 thread (13.3 M/s): threads share
+  one working set. At 128² the reverse holds (18.0 vs 16.8).
