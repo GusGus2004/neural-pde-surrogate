@@ -50,8 +50,76 @@ def riemann(rng, n):
     params = {"split_x": xs, "split_y": ys, "states": states}
     return rho, u, v, p, c["t_end"], params
 
+# blast
 
-FAMILIES = {"riemann": riemann}
+BLAST = dict(
+    rho0=(0.5, 2.0),          # background density (log-uniform)
+    p0=(0.1, 0.5),            # background pressure (log-uniform)
+    n_blasts=(1, 3),          # number of blasts (incl)
+    radius=(0.04, 0.12),      # blast radius
+    p_ratio=(5.0, 40.0),      # blast pressure / background pressure (log-uniform)
+    rho_ratio=(0.5, 2.0),     # blast density / background density (log-uniform)
+    n_bubbles=(0, 2),         # number of density bubbles (inclusive), in pressure balance
+    bubble_radius=(0.05, 0.15),
+    bubble_ratio=(0.3, 3.0),  # bubble density / background density (log-uniform)
+    edge=0.005,               # width of the smoothed edges (physical units, same at every resolution)
+    t_end=0.25,               # same as riemann: every family must share the frame spacing (0.25 / 50 = 0.005)
+)
+
+
+def periodic_distance(X, Y, cx, cy):
+    """Distance to (cx, cy) on the unit periodic box (the shortest way round)."""
+    dx = (X - cx + 0.5) % 1.0 - 0.5
+    dy = (Y - cy + 0.5) % 1.0 - 0.5
+    return np.sqrt(dx**2 + dy**2)
+
+
+def smooth_disc(r, radius, width):
+    """1 inside the disc, 0 outside, with a smooth tanh edge so the circle is not a staircase."""
+    return 0.5 * (1.0 - np.tanh((r - radius) / width))
+
+
+def blast(rng, n):
+    """Quiet background with 1-3 circular high-pressure regions and 0-2 density bubbles, periodic box.
+
+    The bubbles are in pressure balance with the background, so they only move once a blast wave
+    reaches them: shock-bubble interaction, a classic source of vorticity.
+    """
+    c = BLAST
+    rho0, p0 = log_uniform(rng, *c["rho0"]), log_uniform(rng, *c["p0"])
+    x = cell_centres(n)
+    X, Y = np.meshgrid(x, x)
+    rho = np.full((n, n), rho0)
+    p = np.full((n, n), p0)
+
+    blasts = []
+    for _ in range(rng.integers(c["n_blasts"][0], c["n_blasts"][1] + 1)):
+        cx, cy = rng.uniform(0, 1, size=2)
+        R = rng.uniform(*c["radius"])
+        pr, rr = log_uniform(rng, *c["p_ratio"]), log_uniform(rng, *c["rho_ratio"])
+        w = smooth_disc(periodic_distance(X, Y, cx, cy), R, c["edge"])
+        p += w * (pr - 1.0) * p0
+        rho += w * (rr - 1.0) * rho0
+        blasts.append([cx, cy, R, pr, rr])
+
+    bubbles = []
+    for _ in range(rng.integers(c["n_bubbles"][0], c["n_bubbles"][1] + 1)):
+        cx, cy = rng.uniform(0, 1, size=2)
+        R = rng.uniform(*c["bubble_radius"])
+        br = log_uniform(rng, *c["bubble_ratio"])
+        w = smooth_disc(periodic_distance(X, Y, cx, cy), R, c["edge"])
+        rho *= 1.0 + w * (br - 1.0)          # change density only: pressure balance is kept
+        bubbles.append([cx, cy, R, br])
+
+    u = np.zeros((n, n))
+    v = np.zeros((n, n))
+    params = {"rho0": rho0, "p0": p0,
+              "blasts": np.array(blasts).reshape(-1, 5),    
+              "bubbles": np.array(bubbles).reshape(-1, 4)}  
+    return rho, u, v, p, c["t_end"], params
+
+
+FAMILIES = {"riemann": riemann, "blast": blast}
 
 
 def sample(family, index, n):
