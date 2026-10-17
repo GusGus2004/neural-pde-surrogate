@@ -92,3 +92,17 @@ Figure: `outputs/convergence_sine.png`
 ### Performance (single core, MacBook Air)
 
 - Lax–Liu 3, 256²: 682 steps in 7.66 s → 5.84 million cell-updates/s.
+
+### Kelvin–Helmholtz (McNally et al. 2012 smooth setup), HLLC + van Leer, t = 2
+
+| N   | growth rate (0.6 ≤ t ≤ 1.2) | final mode amplitude |
+|-----|-----------------------------|----------------------|
+| 64  | 2.41                        | 0.193                |
+| 128 | 2.71                        | 0.225                |
+| 256 | 2.77                        | 0.228                |
+
+- Converges: differences 0.30 then 0.06 (ratio ≈ 5, consistent with ~2nd order).
+  Richardson-extrapolated growth rate ≈ 2.785; 256² within 0.5%.
+- Coarse grids under-predict growth (numerical diffusion damps the shear layer).
+- Large-scale structure identical at all resolutions; only spiral detail sharpens.
+- Single-core performance: 256², 4511 steps in 50 s → 5.9 M cell-updates/s.
