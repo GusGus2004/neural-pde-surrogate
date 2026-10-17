@@ -22,7 +22,7 @@ using namespace e2d;
 std::map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::map<std::string, std::string> a = {
         {"test", "lax_liu3"}, {"n", "256"}, {"scheme", "hllc"}, {"limiter", "vanleer"},
-        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}};
+        {"cfl", "0.5"}, {"nout", "10"}, {"out", "runs"}, {"tend", "default"}, {"profile", "no"}, {"init", ""}};
     for (int k = 1; k < argc; ++k) {
         std::string key = argv[k];
         if (key.rfind("--", 0) != 0 || k + 1 >= argc) {
@@ -152,17 +152,35 @@ int main(int argc, char* argv[]) {
     else { std::cerr << "Unknown limiter '" << lim_name << "'\n"; return 1; }
 
     std::vector<Conserved> U;
-    Problem pr = setup(test, n, U);
-
+    Problem pr;
+    std::string run_name = test;
+    if (!a["init"].empty()) {
+        // Initial condition from a file: grid, boundaries and state all come from the file
+        InitInfo ii;
+        try {
+            ii = read_initial_condition(a["init"], pr.grid, U);
+        } catch (const std::exception& e) {
+            std::cerr << "Error reading " << a["init"] << ": " << e.what() << '\n';
+            return 1;
+        }
+        pr.t_end = ii.t_end;
+        run_name = ii.test;
+        if (pr.t_end <= 0.0 && a["tend"] == "default") {
+            std::cerr << "The initial-condition file has no t_end; give one with --tend\n";
+            return 1;
+        }
+    } else {
+        pr = setup(test, n, U);
+    }
     if (a["tend"] != "default") pr.t_end = std::atof(a["tend"].c_str());   // override test's end time
     if (!(pr.t_end > 0.0)) { std::cerr << "tend must be positive\n"; return 1; }
 
     const Grid& g = pr.grid;
     Solver solver(g, flux, lim, cfl);
 
-    const std::string dir = a["out"] + "/" + test + "_" + scheme + "_" + lim_name + "_N" + std::to_string(n);
+    const std::string dir = a["out"] + "/" + run_name + "_" + scheme + "_" + lim_name + "_N" + std::to_string(g.nx);
     std::filesystem::create_directories(dir);
-    RunInfo info{test, scheme, lim_name, cfl, 0};
+    RunInfo info{run_name, scheme, lim_name, cfl, 0};
     auto snap_path = [&](int k) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "/snap_%04d.h5", k);
@@ -174,7 +192,7 @@ int main(int argc, char* argv[]) {
     threads = omp_get_max_threads();
 #endif
     std::printf("%s: %d x %d cells, t_end = %g, %s + %s, CFL %g, %d thread(s)\n",
-                test.c_str(), g.nx, g.ny, pr.t_end, scheme.c_str(), lim_name.c_str(), cfl, threads);
+                run_name.c_str(), g.nx, g.ny, pr.t_end, scheme.c_str(), lim_name.c_str(), cfl, threads);
 
     double t = 0.0;
     int step = 0;

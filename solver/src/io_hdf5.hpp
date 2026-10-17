@@ -94,4 +94,114 @@ inline void write_snapshot(const std::string& path, const Grid& g, const std::ve
     H5Fclose(file);
 }
 
+namespace detail {
+
+inline bool has_attr(hid_t obj, const char* name) { return H5Aexists(obj, name) > 0; }
+
+inline double read_attr_double(hid_t obj, const char* name) {
+    if (!has_attr(obj, name)) throw std::runtime_error(std::string("missing attribute ") + name);
+    double value = 0.0;
+    hid_t attr = H5Aopen(obj, name, H5P_DEFAULT);
+    H5Aread(attr, H5T_NATIVE_DOUBLE, &value);       // HDF5 converts from int or float
+    H5Aclose(attr);
+    return value;
+}
+
+inline int read_attr_int(hid_t obj, const char* name) {
+    if (!has_attr(obj, name)) throw std::runtime_error(std::string("missing attribute ") + name);
+    int value = 0;
+    hid_t attr = H5Aopen(obj, name, H5P_DEFAULT);
+    H5Aread(attr, H5T_NATIVE_INT, &value);
+    H5Aclose(attr);
+    return value;
+}
+
+// read string attribute written either by C++ writer (fixed-length) or by h5py (variable-length)
+inline std::string read_attr_string(hid_t obj, const char* name) {
+    if (!has_attr(obj, name)) throw std::runtime_error(std::string("missing attribute ") + name);
+    hid_t attr = H5Aopen(obj, name, H5P_DEFAULT);
+    hid_t type = H5Aget_type(attr);
+    std::string out;
+    if (H5Tis_variable_str(type) > 0) {
+        hid_t mem = H5Tcopy(H5T_C_S1);
+        H5Tset_size(mem, H5T_VARIABLE);
+        H5Tset_cset(mem, H5Tget_cset(type));
+        char* buf = nullptr;
+        H5Aread(attr, mem, &buf);
+        if (buf) out = buf;
+        H5free_memory(buf);
+        H5Tclose(mem);
+    } else {
+        std::vector<char> buf(H5Tget_size(type) + 1, '\0');
+        H5Aread(attr, type, buf.data());
+        out = buf.data();
+    }
+    H5Tclose(type);
+    H5Aclose(attr);
+    return out;
+}
+
+inline std::vector<double> read_dataset(hid_t file, const char* name, size_t expected) {
+    hid_t dset = H5Dopen2(file, name, H5P_DEFAULT);
+    if (dset < 0) throw std::runtime_error(std::string("missing dataset ") + name);
+    hid_t space = H5Dget_space(dset);
+    hssize_t n = H5Sget_simple_extent_npoints(space);
+    if (n != hssize_t(expected))
+        throw std::runtime_error(std::string("dataset ") + name + " has the wrong size");
+    std::vector<double> data(expected);
+    H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+    H5Sclose(space); H5Dclose(dset);
+    return data;
+}
+
+inline BC parse_bc(const std::string& s) {
+    if (s == "periodic") return BC::Periodic;
+    if (s == "transmissive") return BC::Transmissive;
+    throw std::runtime_error("unknown boundary condition '" + s + "'");
+}
+
+}
+
+// initial-condition file describes besides the state itself
+struct InitInfo {
+    std::string test = "init";
+    double t_end = -1.0;          // negative if the file does not specify one
+};
+
+// Read an initial condition in the same format as our snapshots: datasets rho, u, v, p with shape (ny, nx),
+// attributes nx, ny, x_min, x_max, y_min, y_max, bc_x, bc_y, and t_end and test
+// Sets up grid and fills physical cells of U snapshot file is therefore valid
+// init condition which lets a run be restarted from any snapshot
+inline InitInfo read_initial_condition(const std::string& path, Grid& g, std::vector<Conserved>& U) {
+    H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);   // report errors ourselves
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0) throw std::runtime_error("could not open " + path + " (does the file exist?)");
+
+    g = make_grid(detail::read_attr_int(file, "nx"), detail::read_attr_int(file, "ny"),
+                  detail::read_attr_double(file, "x_min"), detail::read_attr_double(file, "x_max"),
+                  detail::read_attr_double(file, "y_min"), detail::read_attr_double(file, "y_max"),
+                  detail::parse_bc(detail::read_attr_string(file, "bc_x")),
+                  detail::parse_bc(detail::read_attr_string(file, "bc_y")));
+
+    const size_t n = size_t(g.nx) * g.ny;
+    auto rho = detail::read_dataset(file, "rho", n);
+    auto u   = detail::read_dataset(file, "u",   n);
+    auto v   = detail::read_dataset(file, "v",   n);
+    auto p   = detail::read_dataset(file, "p",   n);
+
+    InitInfo info;
+    if (detail::has_attr(file, "t_end")) info.t_end = detail::read_attr_double(file, "t_end");
+    if (detail::has_attr(file, "test"))  info.test  = detail::read_attr_string(file, "test");
+    H5Fclose(file);
+
+    U.assign(g.size(), Conserved{});
+    for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+            size_t k = size_t(j) * g.nx + i;
+            if (!(rho[k] > 0.0) || !(p[k] > 0.0))
+                throw std::runtime_error("initial condition has non-positive density or pressure");
+            U[g.idx(i, j)] = to_conserved({rho[k], u[k], v[k], p[k]});
+        }
+    return info;
+}
 }
