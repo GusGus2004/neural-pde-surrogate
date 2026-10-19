@@ -159,3 +159,15 @@ Short KH runs; speed-up relative to 1 thread. Parallel results bit-for-bit ident
   cluster (pinned threads) for definitive scaling numbers.
 - Optimisation targets: inline flux/limiter (templates instead of function pointers);
   avoid primitive↔conserved round trips at faces.
+
+  ## 4. Dataset generation (local batch v0)
+
+MacBook Air, 512² solver, saved at 128² and 64², 4 OpenMP threads, 51 frames per trajectory.
+
+| Family  | Runs | Total time | Per run | 
+|---------|------|------------|---------|
+| riemann | 400  | 4.5 h      | 41 s    |
+| blast   | 400  | 2.9 h      | 26 s    |
+| kh      | 50   | 1.3 h      | 93 s    |
+
+850 trajectories, 0 failures, 5.1 GB. Indices 0–399 / 0–399 / 0–49; the cluster run will continue from there.
