@@ -114,10 +114,15 @@ def main():
     ap.add_argument("--out", default=str(REPO / "data" / "raw"))
     ap.add_argument("--threads", type=int, default=4, help="OpenMP threads per run (default 4)")
     ap.add_argument("--force", action="store_true", help="regenerate files that already exist")
+    ap.add_argument("--allow-dirty", action="store_true",
+                    help="run even if tracked files have uncommitted changes")
     args = ap.parse_args()
 
     if not EXE.exists():
         sys.exit(f"Solver not found at {EXE}: build it first (cmake --build solver/build)")
+    if git_hash().endswith("-dirty") and not args.allow_dirty:
+        sys.exit("Tracked files have uncommitted changes (see git status). Commit them first so the data\n"
+                 "records exactly which code produced it, or pass --allow-dirty if they cannot affect the data.")
     indices = parse_indices(args.indices)
     print(f"{args.family}: {len(indices)} run(s) at {args.n}^2, saving {args.save}, {args.threads} thread(s)")
     counts = {"done": 0, "skipped": 0, "failed": 0}
