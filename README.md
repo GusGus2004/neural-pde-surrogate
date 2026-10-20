@@ -6,7 +6,7 @@ This project builds the whole pipeline needed to answer that question: a validat
 
 Fourier Neural Operators truncate high-frequency modes, which should cause Gibbs-type ringing at shocks — the same problem slope limiters solve in classical schemes. Most surrogate papers also compare against a fine-resolution solver, which flatters the surrogate. Here the comparison is made at **matched accuracy**: the surrogate is compared with the coarse solver run that achieves the same error.
 
-> **Status:** Phase 1 (solver + dataset pipeline) nearly complete — solver validated in 1D and 2D, parallelised and profiled; dataset generator built and tested. Phase 2 (models) next.
+> **Status:** Phase 1 (solver + dataset) complete. Phase 2 (models) in progress: ResNet and U-Net baselines, pushforward training and a positivity-preserving variant evaluated; FNO next.
 
 ---
 
@@ -14,8 +14,8 @@ Fourier Neural Operators truncate high-frequency modes, which should cause Gibbs
 
 | Phase | Content | Status |
 |---|---|---|
-| **1. Solver & data** | 2D compressible Euler solver (C++), validation, OpenMP, profiling, dataset generator | ✅ |
-| **2. Models** | FNO written from scratch, U-Net and ResNet baselines, autoregressive training in JAX, multi-GPU | ✅ |
+| **1. Solver & data** | 2D compressible Euler solver (C++), validation, OpenMP, profiling, dataset generator | ✅ solver · ✅ generator · ✅ dataset v0 (850 trajectories) |
+| **2. Models** | FNO written from scratch, U-Net and ResNet baselines, autoregressive training in JAX, multi-GPU | ✅ baselines · ✅ pushforward · FNO |
 | **3. Evaluation** | rollout error, conservation drift, shock position/width, spectral error, out-of-distribution test, super-resolution, accuracy-vs-cost Pareto front | ⬜ |
 | **4. Stretch** | fused spectral-conv kernel, conservative projection, hybrid solver + learned correction, PDEBench / The Well comparison | ⬜ |
 
@@ -102,7 +102,36 @@ Design choices:
 
 Planned size: ~2,400 Riemann + ~2,400 blast + ~200 KH trajectories (~35 GB).
 
----
+## Surrogates (Phase 2, in progress)
+
+Neural surrogates in JAX/Equinox learn the map `state(t) -> state(t + dt)` (dt = 0.005) on 64² grids and are
+evaluated by **autoregressive rollout**: start from the true first frame and feed the model its own predictions
+for 50 steps. Error is the RMSE divided by the training-set spread of each variable; *persistence*
+("nothing changes") is the do-nothing baseline. A trajectory counts as **blown up** if its error exceeds 2.
+All results below: 80 validation trajectories, small models trained on a laptop CPU, single seed.
+
+**One-step accuracy hides rollout instability.** A ResNet with a one-step error of 3.7% of persistence still
+blew up on 20 of 80 trajectories. Training on the model's own predictions (**pushforward**, Brandstetter et al.
+2022) reduced this to 7/80; a control run with the same extra compute spent on ordinary one-step training did
+not help (21/80, Fisher p = 0.006).
+
+![Training methods](docs/figures/compare_training.png)
+
+**Diagnosing the remaining failures.** Every remaining blow-up began with the model predicting negative density
+in hot, rarefied cells (behind blasts and in rarefactions), and the 14 trajectories that never went non-physical
+never blew up. Making negative density and pressure impossible (predicting log ρ and log p) removed all
+blow-ups (0/80), confirming the cause, but cost typical accuracy (median error at step 50: 0.40 → 0.53).
+
+**Architecture matters for robustness, not just accuracy.** A U-Net, which sees the whole domain through its
+coarse levels, had **twice** the ResNet's one-step error, yet its error grew more slowly: no blow-ups even
+though 79/80 trajectories went non-physical, and the best mean error at step 50 (0.51 vs 0.86), at about half
+the compute per step.
+
+![Architectures and positivity](docs/figures/compare_architecture.png)
+
+Open problem: no model conserves mass (drift up to ~50% after 50 steps, against ~1e-8 for the solver).
+Next: a Fourier Neural Operator written from scratch, then larger models on GPUs and the accuracy-vs-cost
+comparison against the solver.
 
 ## Repository layout
 
@@ -124,6 +153,11 @@ data/
   generate.py           dataset driver: (family, index) -> trajectory file
 experiments/            validation, convergence, scaling and profiling scripts; results.md
 tests/                  Python checks (HDF5 round trip, trajectories, run comparison)
+surrogate/
+  data.py               (trajectory, frame) pairs, train-only normalisation, multi-step targets
+  models.py             periodic ResNet and U-Net, positivity-preserving wrapper
+  train.py              one-step / multistep / pushforward training, fine-tuning, checkpoints
+  rollout.py            autoregressive evaluation: error growth, conservation drift, positivity
 ```
 
 ---
