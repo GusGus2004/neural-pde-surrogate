@@ -76,6 +76,79 @@ class ResNet(eqx.Module):
         scale = jnp.asarray(self.delta_scale, x.dtype)[:, None, None]
         return x + scale * self.project(jax.nn.gelu(h))
 
+class ConvBlock(eqx.Module):
+    """Two periodic 3x3 convolutions with a residual connection: skip(x) + conv(gelu(conv(gelu(x)))).
+    """
+    conv1: PeriodicConv
+    conv2: PeriodicConv
+    skip: PeriodicConv | None
+
+    def __init__(self, c_in, c_out, *, key):
+        k1, k2, k3 = jax.random.split(key, 3)
+        self.conv1 = PeriodicConv(c_in, c_out, 3, key=k1)
+        self.conv2 = PeriodicConv(c_out, c_out, 3, key=k2)
+        self.skip = None if c_in == c_out else PeriodicConv(c_in, c_out, 1, key=k3)
+
+    def __call__(self, x):
+        h = self.conv2(jax.nn.gelu(self.conv1(jax.nn.gelu(x))))
+        return (x if self.skip is None else self.skip(x)) + h
+
+
+def downsample(x):
+    """2x2 average pooling: (c, n, n) -> (c, n/2, n/2). Averaging, like the dataset's own coarsening."""
+    c, n, m = x.shape
+    return x.reshape(c, n // 2, 2, m // 2, 2).mean(axis=(2, 4))
+
+
+def upsample(x):
+    """Nearest-neighbour upsampling: (c, n, n) -> (c, 2n, 2n)."""
+    return jnp.repeat(jnp.repeat(x, 2, axis=1), 2, axis=2)
+
+
+class UNet(eqx.Module):
+    """U-Net with periodic convolutions, predicting the change over one frame (like ResNet).
+
+    levels = number of halvings: with n = 64 and levels = 3 the coarsest grid is 8 x 8, where a single
+    3x3 convolution already spans most of the domain. That is the point of a U-Net here: information
+    travels across the whole domain in a few layers, whereas the ResNet only sees +-(2 x depth) cells.
+
+    Channels double at each coarser level: width, 2 width, 4 width, ... Each level has one ConvBlock on
+    the way down and one on the way up; the way up concatenates the skip connection from the way down.
+
+    Translation equivariance: exact only for shifts that are multiples of 2**levels (the pooling grid).
+    """
+    lift: PeriodicConv
+    down: list
+    bottleneck: ConvBlock
+    up: list
+    project: PeriodicConv
+    delta_scale: tuple = eqx.field(static=True)
+
+    def __init__(self, *, width=16, levels=3, delta_scale=None, key, channels=4):
+        keys = iter(jax.random.split(key, 2 * levels + 3))
+        ch = [width * 2 ** l for l in range(levels + 1)]                  # 16, 32, 64, 128
+        self.lift = PeriodicConv(channels, ch[0], 1, key=next(keys))
+        self.down = [ConvBlock(ch[max(l - 1, 0)], ch[l], key=next(keys)) for l in range(levels)]
+        self.bottleneck = ConvBlock(ch[levels - 1], ch[levels], key=next(keys))
+        self.up = [ConvBlock(ch[l + 1] + ch[l], ch[l], key=next(keys)) for l in range(levels)]
+        project = PeriodicConv(ch[0], channels, 1, key=next(keys))
+        zero = lambda m: (m.conv.weight, m.conv.bias)
+        self.project = eqx.tree_at(zero, project, (jnp.zeros_like(project.conv.weight),
+                                                   jnp.zeros_like(project.conv.bias)))
+        self.delta_scale = (1.0,) * channels if delta_scale is None else tuple(float(d) for d in delta_scale)
+
+    def __call__(self, x):                     
+        h = self.lift(x)
+        skips = []
+        for block in self.down:
+            h = block(h)
+            skips.append(h)
+            h = downsample(h)
+        h = self.bottleneck(h)
+        for block, skip in zip(reversed(self.up), reversed(skips)):
+            h = block(jnp.concatenate([upsample(h), skip], axis=0))
+        scale = jnp.asarray(self.delta_scale, x.dtype)[:, None, None]
+        return x + scale * self.project(jax.nn.gelu(h))
 
 def count_params(model):
     """Number of trainable scalars (floating-point array leaves)."""

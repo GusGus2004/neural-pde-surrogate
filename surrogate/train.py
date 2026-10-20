@@ -6,6 +6,9 @@
   # real training (on a GPU)
   python -m surrogate.train --name resnet_w64_d8 --width 64 --depth 8 --steps 20000
 
+  # U-Net (width = channels at the finest level, doubling per level; --levels halvings)
+  python -m surrogate.train --name unet_w16_l3 --model unet --width 16 --levels 3 --steps 2000
+  
   # positivity-preserving model: works in (log rho, u, v, log p), can never output rho <= 0 or p <= 0
   python -m surrogate.train --name pos_w32_d4 --positive --width 32 --depth 4 --steps 2000
 
@@ -42,6 +45,7 @@ import optax
 
 from surrogate.data import PairDataset
 from surrogate.models import Positive, ResNet, count_params, logprim_stats
+from surrogate.models import Positive, ResNet, UNet, count_params, logprim_stats
 
 POSITIVE_KEYS = ("u_mean", "u_std", "w_mean", "w_std", "w_delta_scale")  
 
@@ -52,6 +56,8 @@ def build_model(cfg, delta_scale, key):
         return Positive(core, tuple(cfg["u_mean"]), tuple(cfg["u_std"]), tuple(cfg["w_mean"]), tuple(cfg["w_std"]))
     if cfg["model"] == "resnet":
         return ResNet(width=cfg["width"], depth=cfg["depth"], delta_scale=delta_scale, key=key)
+    if cfg["model"] == "unet":
+        return UNet(width=cfg["width"], levels=cfg.get("levels", 3), delta_scale=delta_scale, key=key)
     raise ValueError(f"unknown model {cfg['model']}")
 
 
@@ -133,9 +139,10 @@ def evaluate(model, ds, pairs, batch_size):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--name", required=True, help="run name: output goes to runs/<name>/")
-    p.add_argument("--model", default="resnet")
-    p.add_argument("--width", type=int, default=64)
-    p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--model", default="resnet", choices=["resnet", "unet"])
+    p.add_argument("--width", type=int, default=64, help="resnet: channels; unet: channels at the finest level")
+    p.add_argument("--depth", type=int, default=8, help="resnet: number of residual blocks")
+    p.add_argument("--levels", type=int, default=3, help="unet: number of halvings (n must divide by 2**levels)")
     p.add_argument("--n", type=int, default=64, help="training resolution (64 or 128)")
     p.add_argument("--batch", type=int, default=32)
     p.add_argument("--lr", type=float, default=1e-3, help="peak learning rate")
@@ -166,6 +173,7 @@ def main():
         init_cfg = json.loads((Path(args.init) / "config.json").read_text())
         for key in ("model", "width", "depth", "n"):
             setattr(args, key, init_cfg[key])
+        args.levels = init_cfg.get("levels", 3)
         args.positive = init_cfg.get("positive", False)
     train = PairDataset(args.data, "train", args.n, horizon=args.unroll)
     if args.overfit is not None:

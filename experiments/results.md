@@ -171,3 +171,67 @@ MacBook Air, 512² solver, saved at 128² and 64², 4 OpenMP threads, 51 frames 
 | kh      | 50   | 1.3 h      | 93 s    |
 
 850 trajectories, 0 failures, 5.1 GB. Indices 0–399 / 0–399 / 0–49; the cluster run will continue from there.
+
+
+# Dataset log
+
+## v0 — local batch (MacBook Air), 18–19 Oct 2026
+
+- riemann 0–399, blast 0–399, kh 0–49 (850 trajectories, 0 failures, 5.1 GB)
+- solver 512², stored 128² and 64², 51 frames, Δt = 0.005, HLLC + van Leer, CFL 0.5, 4 threads
+- splits (data/splits.py): 640 train / 80 val / 80 test / 50 ood
+
+- packed (data/pack.py): 128² and 64², 5.6 GB; all checks passed (max mass/energy drift 4.5e-8);
+  min rho 0.003, min p 0.0009 (near-vacuum cells from rarefactions/blast cavities)
+
+**Provenance note:** all files record `git_hash = ee12184-dirty`. The uncommitted changes at
+generation time were only `docs/figures/*.png` (staged README figures) and `experiments/results.md`,
+verified with `git diff --stat ee12184`. No solver or data code differed from `ee12184`, so the data
+is exactly what that commit produces.
+
+# Phase 2:
+
+## Model Cost:
+
+- ResNet (w=64, d=8, 591k params): ~4.8 GFLOP forward per 64^2 sample, ~15 GFLOP fwd+bwd.
+Batch-32 step: ~460 GFLOP. JAX CPU conv ~110 GFLOP/s (matmul 215) -> 6.0 s/step measured on the M-series Air.
+=> compute-bound on CPU; Mac for development (w=32, d=4), GPUs for training.
+
+## ResNet 1st Run:
+
+- ResNet w=32 d=4 (74k params), Mac CPU, 2000 steps x batch 32 (2 epochs), lr 1e-3 cosine, 1934 s:
+one-step val MSE 2.19e-3 (normalised) = 0.037 x persistence; train 2.04e-3 (no overfitting).
+Overfit check (train traj 0 only, 300 steps): 0.060 x persistence.
+
+- Rollout (val, 80 traj, from frame 0), RMSE/std mean over vars [persistence]:
+t=1 0.041 [0.143]  t=10 0.198 [0.699]  t=25 0.400 [0.912]  t=50 6.69 [1.007]
+-> beats persistence ~2-4x up to t=25, then diverges. Mass drift up to 1e2 at t=50.
+Negative rho/p in 74/80 trajectories, from step 1. One-step error (0.037 x persistence) hides the instability.
+
+- Median RMSE/std at t=50: 0.587 (persistence ~1.0); 20/80 trajectories blow up (error > 2), onsets spread
+over steps 26-50 (8/40 blast, 12/40 riemann). Mean (6.7) dominated by the blow-ups.
+
+- JAX CPU: lax.scan over conv layers in the backward pass was 18x slower than an unrolled Python loop
+(65 s vs 3.5 s per step, w32 d4, k=3). Using the Python loop for small k. Re-check on GPU.
+
+- Unrolled fine-tuning from resnet_w32_d4_mac, matched wall-clock (~15 min each), val rollouts, last checkpoint:
+                     blown-up  median t50  mean t50  mass drift  t=1
+baseline              20/80     0.587       6.69     1.0e2      0.041
++ one-step 1000 st    21/80     0.518      50.0      6.2e2      0.038
++ multistep k=3 300   19/80     0.548      20.1      1.9e2      0.042
++ pushforward k=3 600  7/80     0.404       0.86     6.3        0.045
+Pushforward vs control: Fisher p = 0.006. Multistep vs control: p = 0.86. Single seed each.
+More one-step training improves one-step error but not stability. Negative rho/p from step 1 persists (66/80).
+
+- Positivity diagnosis (ft_pf3, val): all 7 blow-ups non-physical by step 5 (4 by step 2); 14 trajectories never
+non-physical, 0 blow up. Bad cells at step 5: median 31 (blown) vs 1 (stable); Spearman(bad@5, err50) = +0.51.
+Mostly density (2533 cell-steps) not pressure (406). Bad cells: true rho ~0.11 but p ~0.95 (hot rarefied blast
+interiors / rarefactions), not near-vacuum (0% with p < 0.05). Kinetic share 0.05 -> not cancellation in p.
+
+- Positive (log rho, u, v, log p) wrapper, same recipe (2000 one-step + 600 pushforward k=3), val rollouts:
+                  blown-up  non-phys  mean t50  median t50  median t10  one-step   max mass drift
+ft_pf3 (cons.)     7/80      66/80     0.86      0.404       0.151      0.038      6.3
+pos_pf3 (log)      0/80       0/80     0.62      0.528       0.267      0.056      0.70
+Positivity removes ALL blow-ups (diagnosis confirmed causally) but costs typical accuracy (~30% median t50,
+~1.8x at t10; blasts worst) and one-step accuracy already before fine-tuning (0.049 vs 0.037 at 2000 steps).
+Mass not conserved (up to 70%). Candidate middle way: conserved model + mass-conserving positivity limiter.
