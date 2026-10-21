@@ -235,3 +235,50 @@ pos_pf3 (log)      0/80       0/80     0.62      0.528       0.267      0.056   
 Positivity removes ALL blow-ups (diagnosis confirmed causally) but costs typical accuracy (~30% median t50,
 ~1.8x at t10; blasts worst) and one-step accuracy already before fine-tuning (0.049 vs 0.037 at 2000 steps).
 Mass not conserved (up to 70%). Candidate middle way: conserved model + mass-conserving positivity limiter.
+
+## UNET Runs:
+
+- U-Net w16 L3 (516k params, 0.54 s/step vs ResNet 0.85 on Mac), same recipe (2000 one-step + 600 pf k=3):
+                     blown  non-phys  med t10  med t50  mean t50  one-step  mass drift
+ResNet cons + pf     7/80   66/80     0.151    0.404    0.86      0.038     6.3
+ResNet pos  + pf     0/80    0/80     0.267    0.528    0.62      0.056     0.70
+U-Net  cons + pf     0/80   79/80     0.208    0.416    0.51      0.077     0.54
+U-Net  pos  + pf     1/80    0/80     0.248    0.608    0.70      0.097     0.38
+- U-Net cons: 0 blow-ups despite 79/80 non-physical (vs ResNet 7/80, Fisher p = 0.014): negative cells are
+  not sufficient for blow-up; they were the trigger for the local ResNet only.
+- U-Net: 2x worse one-step, worse early, but slower error growth -> equal median, best mean at t50.
+- Positivity costs accuracy in both architectures. U-Net had ~half the compute at equal steps. Single seed.
+
+## FNO:
+
+- FNO w32 d4 m16 (4.2M params, ~ResNet cost/step), same recipe, val rollouts:
+                blown  non-phys  med t10  med t50  mean t50  median mass drift t50
+ResNet          7/80   66/80     0.151    0.404    0.863     4.5e-2
+U-Net           0/80   79/80     0.208    0.416    0.507     3.7e-2
+FNO             3/80   71/80     0.203    0.454    0.634     4.3e-2
+ResNet pos      0/80    0/80     0.267    0.528    0.621     3.6e-2
+U-Net pos       1/80    0/80     0.248    0.608    0.695     4.7e-2
+FNO pos         1/80    0/80     0.288    0.571    0.680     6.9e-2
+- Medians within ~10% (single seed): no architecture clearly best at this scale. Global models (U-Net, FNO)
+  blew up less than the local ResNet. FNO slightly worse on blasts (sharp curved shocks) -- to be tested.
+- Positivity costs accuracy in all 3 architectures. Mass drift ~4-7% median for all models.
+- FNO likely under-trained (4.2M params, 2600 steps); no claim of FNO inferiority.
+
+- JAX CPU: lax.scan rollouts of conv models 23x slower than a Python loop over a jitted step
+(ResNet w32 d4: 8.8 vs 0.39 s per 50-step trajectory); identical outputs. Fixed in rollout.py.
+
+# Phase 3:
+## Surrogates vs Solver:
+
+- Accuracy vs cost (val, Mac CPU; solver 1 thread, surrogates all cores, best of 3, batch 80):
+                 s/traj b1  s/traj b80  median err t50
+solver 32^2        0.042       -           0.243
+solver 64^2        0.239       -           0.137
+solver 128^2       1.432       -           0.073
+ResNet             0.336     0.287         0.404
+U-Net              0.288     0.231         0.416
+FNO                0.345     0.203         0.454
+ResNet pos         0.323     0.290         0.528
+All surrogates dominated by the solver: same cost as 64^2 solver with ~3x its error; 32^2 solver is both
+cheaper (6x) and more accurate. Batching on CPU gives only 1.2-1.7x. Crossing the solver line needs ~3x
+better accuracy at fixed cost (target median t50 < ~0.13), or ~10x lower cost at fixed accuracy.

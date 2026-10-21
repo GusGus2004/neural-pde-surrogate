@@ -30,14 +30,20 @@ VARS = ["rho", "rho_u", "rho_v", "E"]
 
 
 @eqx.filter_jit
-def rollout(model, x0, steps):
-    """x0: (B, 4, n, n) normalised. Returns (B, steps, 4, n, n): predictions for frames 1..steps."""
-    def body(x, _):
-        x_next = jax.vmap(model)(x)
-        return x_next, x_next
-    _, preds = jax.lax.scan(body, x0, None, length=steps)
-    return jnp.swapaxes(preds, 0, 1)
+def _step(model, x):
+    return jax.vmap(model)(x)
 
+
+def rollout(model, x0, steps):
+    """x0: (B, 4, n, n) normalised. Returns (B, steps, 4, n, n): predictions for frames 1..steps.
+
+    """
+    preds = []
+    x = x0
+    for _ in range(steps):
+        x = _step(model, x)
+        preds.append(x)
+    return jnp.stack(preds, axis=1)
 
 def pressure(U):
     """U: (..., 4, n, n) conserved -> pressure (..., n, n)."""

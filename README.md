@@ -133,6 +133,15 @@ Open problem: no model conserves mass (drift up to ~50% after 50 steps, against 
 Next: a Fourier Neural Operator written from scratch, then larger models on GPUs and the accuracy-vs-cost
 comparison against the solver.
 
+**Against the solver at matched cost, the surrogates do not yet win.** Running the solver itself at 32², 64²
+and 128² from the same first frame gives an accuracy-vs-cost line. Every surrogate lies above it: they cost
+about the same as a 64² solver run but have ~3x its error, and a 32² solver run is both 6x cheaper and more
+accurate. The surrogates also drift in total mass by ~4%, against ~1e-8 for the solver. To cross the line a
+surrogate needs ~3x better accuracy at the same cost (or ~10x lower cost on comparable hardware): the target
+for the next, larger-scale experiments.
+
+![Accuracy vs cost](docs/figures/pareto_val.png)
+
 ## Repository layout
 
 ```
