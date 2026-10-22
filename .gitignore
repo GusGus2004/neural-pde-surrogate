@@ -28,4 +28,5 @@ runs/
 runs_conc/
 runs*/
 
-data/raw*/
+data/raw*/logs/
+cluster/jobs/
