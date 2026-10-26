@@ -282,3 +282,22 @@ ResNet pos         0.323     0.290         0.528
 All surrogates dominated by the solver: same cost as 64^2 solver with ~3x its error; 32^2 solver is both
 cheaper (6x) and more accurate. Batching on CPU gives only 1.2-1.7x. Crossing the solver line needs ~3x
 better accuracy at fixed cost (target median t50 < ~0.13), or ~10x lower cost at fixed accuracy.
+
+## CAMBRIDGE GPUs (Lovelace):
+
+lovelace (NVIDIA A30, JAX 0.6.2), training step batch 32 at 64^2:
+ResNet w64 d8: 46 ms (Mac CPU 5971 ms, ~130x; ~10 TFLOP/s ~ A30 fp32 peak).
+ResNet w32 d4 / U-Net w16 L3: ~20 ms (~40x / ~25x): small models are overhead-bound on the GPU.
+
+
+- seeds_small on lovelace (A30): Mac recipe, 3 seeds per model, val rollouts (mean ± sd over seeds):
+| | seeds | blown | non-phys | med t10 | med t50 | mean t50 | mass t50 | one-step |
+| FNO    | 3 | 1.0 ± 1.7 | 71.3 ± 1.5 | 0.213 ± 0.014 | 0.496 ± 0.037 | 0.585 ± 0.047 | 4.7e-02 ± 1.6e-02 | 0.0762 ± 0.0036 |
+| ResNet | 3 | 2.3 ± 2.5 | 67.3 ± 2.3 | 0.152 ± 0.002 | 0.385 ± 0.028 | 0.611 ± 0.236 | 3.5e-02 ± 9.3e-03 | 0.0380 ± 0.0008 |
+| U-Net  | 3 | 0.0 ± 0.0 | 78.3 ± 0.6 | 0.202 ± 0.005 | 0.433 ± 0.005 | 0.515 ± 0.013 | 3.2e-02 ± 8.7e-03 | 0.0717 ± 0.0042 |
+Seed 0 reproduces the Mac runs (medians 0.454 / 0.405 / 0.431 vs 0.454 / 0.404 / 0.416).
+- ResNet best median at every seed (0.354-0.405 vs U-Net 0.431-0.439, FNO 0.454-0.522).
+- U-Net 0 blow-ups in all seeds; ResNet 5/2/0, FNO 3/0/0 -> single-seed blow-up counts are unreliable.
+  Pooled over seeds: ResNet 7/240 vs U-Net 0/240 (Fisher p = 0.015, trajectories shared across seeds).
+- Trade-off: local ResNet most accurate but occasionally unstable; U-Net slightly less accurate, robust.
+- Whole sweep: 29 min on one A30 (each run ~50 min on the Mac CPU).

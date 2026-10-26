@@ -102,7 +102,7 @@ Design choices:
 
 Planned size: ~2,400 Riemann + ~2,400 blast + ~200 KH trajectories (~35 GB).
 
-## Surrogates (Phase 2, in progress)
+## Surrogates (Phase 2)
 
 Neural surrogates in JAX/Equinox learn the map `state(t) -> state(t + dt)` (dt = 0.005) on 64² grids and are
 evaluated by **autoregressive rollout**: start from the true first frame and feed the model its own predictions
@@ -140,6 +140,8 @@ accurate. The surrogates also drift in total mass by ~4%, against ~1e-8 for the 
 surrogate needs ~3x better accuracy at the same cost (or ~10x lower cost on comparable hardware): the target
 for the next, larger-scale experiments.
 
+**Cambridge GPU Trials.** Across 3 seeds, the ResNet has the best typical accuracy and the U-Net is the only model that never blew up: an accuracy-robustness trade-off.
+ 
 ![Accuracy vs cost](docs/figures/pareto_val.png)
 
 ## Repository layout
