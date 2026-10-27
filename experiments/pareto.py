@@ -6,8 +6,10 @@
 Accuracy: median error at the last rollout step (RMSE / train std, averaged over variables), read from
 runs/<name>/rollout_<split>.npz -- so run surrogate/rollout.py and experiments/solver_baseline.py first.
 
-Cost: wall-clock time to produce one 50-step trajectory on this machine.
-  - solver: the solver's own compute time, single thread (measured by solver_baseline.py)
+Cost: wall-clock time to produce one 50-step trajectory.
+  - solver (--solvers): the solver's own compute time on ONE core (measured by solver_baseline.py)
+  - solver (--solvers-parallel): throughput with many cores at once = total wall time / trajectories, from
+    solver_baseline.py --workers N (the fair comparison with a batched GPU)
   - surrogate: measured here, for a full 50-step rollout, after compiling, best of --repeats:
       batch 1   one trajectory at a time (like running the solver once)
       batch B   B trajectories at once, time divided by B (how a network is used efficiently)
@@ -18,6 +20,7 @@ Writes outputs/pareto_<split>.png and runs/<name>/timing_<device>.json for each 
 """
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -54,7 +57,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--models", nargs="+", default=[], help="surrogate run directories")
     p.add_argument("--labels", nargs="+", help="labels for --models (default: run names)")
-    p.add_argument("--solvers", nargs="+", default=[], help="solver_baseline.py output directories")
+    p.add_argument("--solvers", nargs="+", default=[], help="solver_baseline.py output dirs (one-core time)")
+    p.add_argument("--solvers-parallel", nargs="+", default=[],
+                   help="solver_baseline.py --workers N output dirs (throughput of N cores)")
     p.add_argument("--split", default="val")
     p.add_argument("--data", default="data/packed")
     p.add_argument("--batch", type=int, default=80, help="trajectories per batched rollout")
@@ -68,16 +73,23 @@ def main():
     rows = []
 
     # Solver points, joined into a line: the solver's own accuracy-vs-cost curve
-    if args.solvers:
+    for dirs, parallel, style in ((args.solvers, False, "k-o"), (args.solvers_parallel, True, "k--s")):
+        if not dirs:
+            continue
         pts = []
-        for s in args.solvers:
+        for s in dirs:
             err, d = median_last(s, args.split)
-            cost = float(np.mean(d["solver_seconds"]))
-            n = Path(s).name.split("_")[-1]
-            pts.append((cost, err, f"solver {n}²"))
-            rows.append((f"solver {n}^2 (1 thread)", cost, None, err))
+            n = re.match(r"solver_(\d+)", Path(s).name).group(1)
+            if parallel:
+                cost, workers = float(d["throughput_seconds"]), int(d["workers"])
+                what = f"{workers} cores"
+            else:
+                cost, what = float(np.mean(d["solver_seconds"])), "1 core"
+            pts.append((cost, err, f"{n}²"))
+            rows.append((f"solver {n}^2 ({what})", cost, None, err))
         pts.sort()
-        ax.plot([c for c, _, _ in pts], [e for _, e, _ in pts], "k-o", label="solver (1 thread)", zorder=3)
+        ax.plot([c for c, _, _ in pts], [e for _, e, _ in pts], style, label=f"solver ({what})", zorder=3,
+                mfc="white" if parallel else "black")
         for c, e, name in pts:
             ax.annotate(name, (c, e), textcoords="offset points", xytext=(6, 6), fontsize=9)
 
@@ -85,7 +97,7 @@ def main():
     if args.models:
         ds = PairDataset(args.data, args.split, 64, horizon=1)
         steps = ds.n_frames - 1
-        x_all = np.stack([ds.trajectory(k)[0] for k in range(ds.n_traj)])     # normalised
+        x_all = np.stack([ds.trajectory(k)[0] for k in range(ds.n_traj)])     # true first frames, normalised
         B = min(args.batch, ds.n_traj)
         for run, label, c in zip(args.models, labels, plt.cm.tab10.colors):
             err, _ = median_last(run, args.split)
