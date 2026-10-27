@@ -301,3 +301,25 @@ Seed 0 reproduces the Mac runs (medians 0.454 / 0.405 / 0.431 vs 0.454 / 0.404 /
   Pooled over seeds: ResNet 7/240 vs U-Net 0/240 (Fisher p = 0.015, trajectories shared across seeds).
 - Trade-off: local ResNet most accurate but occasionally unstable; U-Net slightly less accurate, robust.
 - Whole sweep: 29 min on one A30 (each run ~50 min on the Mac CPU).
+
+
+## Sweep Scale:
+
+- scale sweep on lovelace (A30): large models, 20000 one-step + 3000 pushforward steps, 3 seeds, val rollouts:
+| ResNet large (w64 d8)   | 3 | blown 0.0 ± 0.0 | non-phys 27.3 ± 3.1 | med t10 0.042 ± 0.000 | med t50 0.119 ± 0.003 | mean t50 0.179 ± 0.004 | mass 4.3e-03 ± 7.8e-04 | one-step 0.0060 ± 0.0000 |
+| U-Net large (w32 L3)    | 3 | blown 0.0 ± 0.0 | non-phys 38.3 ± 2.3 | med t10 0.076 ± 0.003 | med t50 0.188 ± 0.003 | mean t50 0.270 ± 0.005 | mass 7.5e-03 ± 1.5e-03 | one-step 0.0140 ± 0.0001 |
+| FNO large (w64 d4 m16)  | 3 | blown 0.0 ± 0.0 | non-phys 53.0 ± 2.0 | med t10 0.113 ± 0.005 | med t50 0.300 ± 0.010 | mean t50 0.380 ± 0.004 | mass 2.0e-02 ± 1.5e-03 | one-step 0.0312 ± 0.0002 |
+- Large ResNet median t50 0.119 < 64^2 solver 0.137 (all 3 seeds); at t10 0.042 vs 0.106. Mean t50 0.179 > solver 0.165.
+- Scale: 3.2x (ResNet), 2.3x (U-Net), 1.7x (FNO) better medians; 0 blow-ups in all 9 runs; fewer non-physical.
+- Ranking unchanged; FNO gains least from scale. Model size and training length changed together (confounded).
+- Still to do: cost of the large models (A30 and CPU); final numbers on the untouched test split.
+
+## Costs:
+
+Cost on lovelace A30 (JAX 0.6.2), 50-step rollout, s per trajectory (batch 1 / batch 80), seed-0 model:
+ResNet large 0.066 / 0.018 (med t50 0.121); U-Net large 0.063 / 0.0070 (0.187);
+FNO large 0.054 / 0.0072 (0.311); ResNet small 0.033 / 0.0046 (0.405).
+Solver, 1 Mac CPU core: 32^2 0.042 s (0.243), 64^2 0.24 s (0.137), 128^2 1.43 s (0.073); ~0.35 s at 0.12 (interp.).
+=> ResNet large: more accurate than 64^2 solver and ~13x faster (~19x at matched accuracy) vs ONE CPU core.
+   vs 32 cores in parallel (ideal scaling) roughly break-even -- to be measured on lovelace's own CPUs.
+   Training cost (~20 GPU-min + ~9 h of 512^2 data generation) and growing error beyond 50 steps not included.
